@@ -47,3 +47,20 @@ DJANGO_DB_ROLE=owner python manage.py migrate
 (3 a 40 caracteres, lista de reservados em `apps/contas/validators.py`). O admin da plataforma troca o slug
 com `profissional.alterar_slug_admin(novo, por=superusuario)`. Status: `pendente -> ativa | rejeitada` e
 `ativa <-> suspensa`, via `profissional.mudar_status(novo, por=superusuario, motivo="")`.
+
+## API publica de agendamento (sem login)
+
+Sob `/api/v1/publico/<slug>/` (slug inexistente ou de conta nao ativa = o mesmo 404):
+
+- `GET servicos/` · `GET horarios/?servico=ID&data=AAAA-MM-DD`
+- `POST agendamentos/` (servico, inicio, nome, telefone, consentimento=true, observacao?, website vazio)
+- `POST agendamento/consultar/` e `POST agendamento/cancelar/` com `{token}` ou `{codigo, telefone}`
+
+Erros no formato `{code, message, fields}`. O limite de requisicoes usa cache em tabela:
+crie-a uma vez com `DJANGO_DB_ROLE=owner python manage.py createcachetable` (os testes a criam sozinhos).
+Limites em `LIMITES_PUBLICOS` (settings.py); o IP e o `REMOTE_ADDR` por enquanto (ver `NUM_PROXIES`).
+
+## Testes em paralelo
+
+Para dois executores usarem o mesmo PostgreSQL sem colidir, defina `POSTGRES_TEST_DB` com um nome de banco
+de testes proprio: `DJANGO_DB_ROLE=owner POSTGRES_TEST_DB=test_forja python manage.py test`.

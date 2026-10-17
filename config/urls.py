@@ -2,4 +2,5 @@ from django.urls import include, path
 
 urlpatterns = [
     path("api/v1/", include("apps.core.urls")),
+    path("api/v1/publico/<str:slug>/", include("apps.agenda.urls_publico")),
 ]
