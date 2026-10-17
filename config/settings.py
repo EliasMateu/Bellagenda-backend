@@ -77,12 +77,22 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+# "app" (padrao): usuario sem DDL, usado pela aplicacao.
+# "owner": dono do banco, necessario para migrate e testes (cria tabelas e o banco de teste).
+DJANGO_DB_ROLE = os.environ.get("DJANGO_DB_ROLE", "app")
+if DJANGO_DB_ROLE == "owner":
+    _db_user, _db_password = os.environ["POSTGRES_USER"], os.environ["POSTGRES_PASSWORD"]
+elif DJANGO_DB_ROLE == "app":
+    _db_user, _db_password = os.environ["POSTGRES_APP_USER"], os.environ["POSTGRES_APP_PASSWORD"]
+else:
+    raise ValueError("DJANGO_DB_ROLE deve ser 'app' ou 'owner'")
+
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.postgresql",
         "NAME": os.environ["POSTGRES_DB"],
-        "USER": os.environ["POSTGRES_USER"],
-        "PASSWORD": os.environ["POSTGRES_PASSWORD"],
+        "USER": _db_user,
+        "PASSWORD": _db_password,
         "HOST": os.environ.get("POSTGRES_HOST", "127.0.0.1"),
         "PORT": os.environ.get("POSTGRES_PORT", "5432"),
     }
