@@ -123,6 +123,11 @@ TIME_ZONE = "America/Sao_Paulo"
 USE_I18N = True
 USE_TZ = True
 
+# Caminho do backoffice (Django admin). Em producao DEFINA DJANGO_ADMIN_PATH com um valor proprio e
+# nao obvio; o padrao abaixo e apenas para desenvolvimento.
+ADMIN_PATH = os.environ.get("DJANGO_ADMIN_PATH", "").strip().strip("/") or "gestao-interna"
+ADMIN_PATH += "/"
+
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
