@@ -36,9 +36,13 @@ def _hora_local(dia, hora, tz):
 
 
 def horarios_livres(
-    profissional, servico, dia, agora=None, config=None, considerar_agendamentos=True
+    profissional, servico, dia, agora=None, config=None, considerar_agendamentos=True,
+    aplicar_antecedencia=True,
 ):
-    """Lista de inicios livres (datetimes no fuso da profissional) para `dia` (date local)."""
+    """Lista de inicios livres (datetimes no fuso da profissional) para `dia` (date local).
+
+    `aplicar_antecedencia=False` ignora antecedencia minima e janela maxima (uso no painel).
+    """
     config = config or configuracao_efetiva(profissional)
     tz = ZoneInfo(config.timezone)
     agora = agora or timezone.now()
@@ -81,7 +85,9 @@ def horarios_livres(
             if inicio is None:
                 continue
             fim = inicio + duracao
-            if fim > fim_expediente or inicio < minimo or inicio > maximo:
+            if fim > fim_expediente:
+                continue
+            if aplicar_antecedencia and (inicio < minimo or inicio > maximo):
                 continue
             if any(b_ini < fim and inicio < b_fim for b_ini, b_fim in bloqueios):
                 continue
@@ -92,12 +98,16 @@ def horarios_livres(
     return [inicio.astimezone(tz) for inicio in sorted(livres)]
 
 
-def horario_oferecido(profissional, servico, inicio, agora=None, considerar_agendamentos=True):
+def horario_oferecido(
+    profissional, servico, inicio, agora=None, considerar_agendamentos=True,
+    aplicar_antecedencia=True,
+):
     """True se `inicio` (datetime aware) esta entre os horarios oferecidos para o servico."""
     config = configuracao_efetiva(profissional)
     dia = inicio.astimezone(ZoneInfo(config.timezone)).date()
     livres = horarios_livres(
-        profissional, servico, dia, agora, config, considerar_agendamentos
+        profissional, servico, dia, agora, config, considerar_agendamentos,
+        aplicar_antecedencia,
     )
     return inicio.astimezone(UTC) in {h.astimezone(UTC) for h in livres}
 

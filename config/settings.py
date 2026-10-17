@@ -26,9 +26,13 @@ def _lista(valor):
     return [item.strip() for item in valor.split(",") if item.strip()]
 
 
+def _booleano(valor):
+    return valor.strip().lower() in ("1", "true", "yes")
+
+
 SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 
-DEBUG = os.environ.get("DJANGO_DEBUG", "False").lower() in ("1", "true", "yes")
+DEBUG = _booleano(os.environ.get("DJANGO_DEBUG", "False"))
 
 ALLOWED_HOSTS = _lista(os.environ.get("DJANGO_ALLOWED_HOSTS", ""))
 
@@ -128,7 +132,18 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "EXCEPTION_HANDLER": "apps.core.exceptions.tratar_excecao",
+    # Restritivo por padrao: views publicas, saude e login declaram suas listas explicitamente.
+    "DEFAULT_AUTHENTICATION_CLASSES": ["rest_framework.authentication.SessionAuthentication"],
+    "DEFAULT_PERMISSION_CLASSES": ["rest_framework.permissions.IsAuthenticated"],
 }
+
+# Cookies e CSRF. Em producao (HTTPS) defina DJANGO_SESSION_COOKIE_SECURE/DJANGO_CSRF_COOKIE_SECURE=True.
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+CSRF_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_SECURE = _booleano(os.environ.get("DJANGO_SESSION_COOKIE_SECURE", "False"))
+CSRF_COOKIE_SECURE = _booleano(os.environ.get("DJANGO_CSRF_COOKIE_SECURE", "False"))
+CSRF_TRUSTED_ORIGINS = _lista(os.environ.get("DJANGO_CSRF_TRUSTED_ORIGINS", ""))
 
 # Cache em tabela (sem Redis), usado pelo limite de requisicoes. Crie a tabela com
 # `DJANGO_DB_ROLE=owner python manage.py createcachetable`. MAX_ENTRIES alto evita que o
@@ -147,6 +162,8 @@ LIMITES_PUBLICOS = {
     "telefone": (5, 3600),        # criacoes de agendamento por telefone
     "tenant": (30, 3600),         # POSTs publicos por profissional (slug)
     "consulta": (5, 3600),        # consultar/cancelar por IP + slug
+    "login_ip": (10, 3600),       # tentativas de login por IP
+    "login_usuario": (10, 3600),  # tentativas de login por username
 }
 
 # IP do cliente: por ora REMOTE_ADDR. Quando o proxy da Vercel/Caddy estiver na frente, o IP real

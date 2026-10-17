@@ -69,3 +69,42 @@ def criar_agendamento(profissional, inicio_min=0, duracao_min=60, cliente=None, 
         preco_cobrado=Decimal("50.00"),
         **extra,
     )
+
+
+# ---- utilitarios do painel/login ------------------------------------------------------------
+
+from datetime import date  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+from django.conf import settings  # noqa: E402
+from django.utils import timezone  # noqa: E402
+from rest_framework.test import APIClient  # noqa: E402
+
+SP = ZoneInfo("America/Sao_Paulo")
+LIMITES_ALTOS = {chave: (10_000, 3600) for chave in settings.LIMITES_PUBLICOS}
+
+
+def dia_futuro(dias=7) -> date:
+    return timezone.now().astimezone(SP).date() + timedelta(days=dias)
+
+
+def cliente_logado(user, enforce_csrf=True):
+    """APIClient autenticado por sessao que envia o cabecalho CSRF (como o frontend faria)."""
+    client = APIClient(enforce_csrf_checks=enforce_csrf)
+    client.force_login(user)
+    token = client.get("/api/v1/auth/csrf/").json()["csrfToken"]
+    client.defaults["HTTP_X_CSRFTOKEN"] = token
+    return client
+
+
+def configurar_expediente(profissional, inicio=None, fim=None):
+    """Expediente de segunda a domingo (09:00-18:00 por padrao)."""
+    from datetime import time
+
+    from apps.agenda.models import HorarioTrabalho
+
+    for dia in range(7):
+        HorarioTrabalho.objects.create(
+            profissional=profissional, dia_semana=dia,
+            inicio=inicio or time(9), fim=fim or time(18),
+        )

@@ -64,3 +64,13 @@ Limites em `LIMITES_PUBLICOS` (settings.py); o IP e o `REMOTE_ADDR` por enquanto
 
 Para dois executores usarem o mesmo PostgreSQL sem colidir, defina `POSTGRES_TEST_DB` com um nome de banco
 de testes proprio: `DJANGO_DB_ROLE=owner POSTGRES_TEST_DB=test_forja python manage.py test`.
+
+## Login e painel
+
+- `GET /api/v1/auth/csrf/` define o cookie `csrftoken` (e devolve o token); enviar em `X-CSRFToken` nos POST/PATCH/DELETE.
+- `POST /api/v1/auth/login/` (username, password), `POST /api/v1/auth/logout/`, `GET /api/v1/auth/me/`.
+  Conta pendente loga e ve `/auth/me`, mas o painel responde 403.
+- `/api/v1/painel/`: `servicos`, `clientes` (`?busca=`), `horarios-trabalho`, `bloqueios`, `configuracao`,
+  `agendamentos` (`?de=&ate=&status=`; acoes POST `confirmar`, `recusar`, `cancelar`, `concluir`, `faltou`, `remarcar`).
+- Cookies: `DJANGO_SESSION_COOKIE_SECURE`, `DJANGO_CSRF_COOKIE_SECURE` (True em producao) e `DJANGO_CSRF_TRUSTED_ORIGINS`.
+- Use `--noinput` ao rodar testes sem terminal (`manage.py test --noinput`), para recriar o banco de testes sem perguntar.

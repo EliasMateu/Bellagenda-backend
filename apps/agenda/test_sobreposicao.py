@@ -3,7 +3,7 @@
 import threading
 from datetime import timedelta
 
-from django.db import IntegrityError, connection, transaction
+from django.db import IntegrityError, OperationalError, connection, transaction
 from django.test import TestCase, TransactionTestCase
 
 from apps.core.testutils import (
@@ -106,6 +106,10 @@ class SobreposicaoConcorrenteTests(TransactionTestCase):
                 resultados.append("ok")
             except IntegrityError:
                 resultados.append("conflito")
+            except OperationalError as erro:
+                # Sem o lock da API, o PostgreSQL pode resolver a corrida abortando uma das
+                # transacoes por deadlock; ainda assim so uma insercao vence.
+                resultados.append("conflito" if "deadlock" in str(erro).lower() else f"erro: {erro!r}")
             except Exception as erro:  # noqa: BLE001 - qualquer outra falha deve reprovar o teste
                 resultados.append(f"erro: {erro!r}")
             finally:
