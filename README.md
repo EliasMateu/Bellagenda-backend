@@ -56,6 +56,12 @@ Sob `/api/v1/publico/<slug>/` (slug inexistente ou de conta nao ativa = o mesmo 
 - `POST agendamentos/` (servico, inicio, nome, telefone, consentimento=true, observacao?, website vazio)
 - `POST agendamento/consultar/` e `POST agendamento/cancelar/` com `{token}` ou `{codigo, telefone}`
 
+A consulta devolve `codigo, status, inicio, fim, servico{nome, duracao_min}, preco, profissional` (nome de
+exibicao), `profissional_telefone`, `cliente{nome, telefone mascarado}`, `cancelamento_ate` e `pode_cancelar`.
+`profissional_telefone` e o contato da profissional em E.164 (ex.: `+5515997669299`, para o botao de WhatsApp) ou
+`null` se vazio/invalido; e publico por decisao do usuario (D-32), so aparece na consulta bem-sucedida (nunca na
+criacao, em servicos, horarios ou nos 404). O telefone da cliente segue mascarado.
+
 Erros no formato `{code, message, fields}`. O limite de requisicoes usa cache em tabela:
 crie-a uma vez com `DJANGO_DB_ROLE=owner python manage.py createcachetable` (os testes a criam sozinhos).
 Limites em `LIMITES_PUBLICOS` (settings.py); o IP e o `REMOTE_ADDR` por enquanto (ver `NUM_PROXIES`).

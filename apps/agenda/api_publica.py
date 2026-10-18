@@ -3,6 +3,7 @@
 from datetime import timedelta
 from zoneinfo import ZoneInfo
 
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import serializers, status
@@ -92,6 +93,14 @@ def _servico_ativo(profissional, pk):
 
 def _iso(dt, tz):
     return dt.astimezone(tz).isoformat()
+
+
+def telefone_publico_profissional(profissional):
+    """Contato da profissional (publico por decisao do usuario, D-32) em E.164, ou None se vazio/invalido."""
+    try:
+        return normalizar_telefone_br(profissional.telefone)
+    except ValidationError:
+        return None
 
 
 def mascarar_telefone(telefone):
@@ -316,6 +325,7 @@ class ConsultarAgendamentoView(PublicoView):
                 },
                 "preco": str(agendamento.preco_cobrado),
                 "profissional": profissional.nome_exibicao,
+                "profissional_telefone": telefone_publico_profissional(profissional),
                 "cliente": {
                     "nome": agendamento.cliente.nome,
                     "telefone": mascarar_telefone(agendamento.cliente.telefone),
