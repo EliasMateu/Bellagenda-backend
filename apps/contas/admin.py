@@ -8,12 +8,12 @@ from django import forms
 from django.contrib import admin, messages
 from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
 from django.template.response import TemplateResponse
 from django.urls import reverse
 
 from .admin_site import backoffice_site
 from .models import Profissional, TransicaoInvalidaError
+from .servicos import mudar_status_auditado
 
 
 class MotivoForm(forms.Form):
@@ -60,27 +60,18 @@ class ProfissionalAdmin(admin.ModelAdmin):
     def _aplicar(self, request, queryset, novo_status, motivo, rotulo, so_de=None):
         aplicadas = 0
         for pk in queryset.values_list("pk", flat=True):
-            with transaction.atomic():
-                profissional = Profissional.objects.select_for_update().get(pk=pk)
-                antes = profissional.status
-                try:
-                    if so_de is not None and antes != so_de:
-                        # ex.: "aprovar" so vale para pendente e "reativar" so para suspensa
-                        raise TransicaoInvalidaError("acao nao se aplica ao status atual")
-                    profissional.mudar_status(novo_status, request.user, motivo)
-                except TransicaoInvalidaError:
-                    self.message_user(
-                        request,
-                        f"{profissional.nome_exibicao}: transicao invalida "
-                        f"({antes} -> {novo_status}); nada foi alterado.",
-                        messages.ERROR,
-                    )
-                    continue
-                mensagem = f"Status: {antes} -> {novo_status}."
-                if motivo:
-                    mensagem += f" Motivo: {motivo}"
-                self.log_change(request, profissional, mensagem)
-                aplicadas += 1
+            try:
+                # "aprovar" so vale para pendente e "reativar" so para suspensa (so_de)
+                mudar_status_auditado(pk, novo_status, request.user, motivo, so_de=so_de)
+            except TransicaoInvalidaError as erro:
+                self.message_user(
+                    request,
+                    f"{erro.profissional.nome_exibicao}: transicao invalida "
+                    f"({erro.antes} -> {novo_status}); nada foi alterado.",
+                    messages.ERROR,
+                )
+                continue
+            aplicadas += 1
         if aplicadas:
             self.message_user(request, f"{aplicadas} conta(s) {rotulo}.", messages.SUCCESS)
 

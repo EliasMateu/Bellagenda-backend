@@ -111,6 +111,25 @@ class LimiteConsultaPorTenant(LimitePorTenant):
         return self.escopo_token if identificacao_por_token(request) else self.escopo
 
 
+class LimiteCadastroPorIP(LimiteJanelaFixa):
+    """POST do cadastro aberto: poucas contas por hora por IP."""
+
+    escopo = "cadastro_ip"
+
+    def identificador(self, request, view):
+        return ip_do_cliente(request)
+
+
+class LimiteChecagemSlugPorIP(LimiteJanelaFixa):
+    """GET da checagem de slug: limita a enumeracao de slugs por IP."""
+
+    escopo = "cadastro_slug"
+    metodos = ("GET",)
+
+    def identificador(self, request, view):
+        return ip_do_cliente(request)
+
+
 class LimiteFalhasLogin:
     """Conta SOMENTE falhas de autenticacao (sucesso nao conta), em tres chaves.
 
