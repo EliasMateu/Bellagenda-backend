@@ -108,14 +108,14 @@ class IsolamentoTenantTests(TestCase):
         }
         resposta = self.client_b.post("/agendamentos/", corpo, format="json")
         self.assertEqual(resposta.status_code, 400)
-        self.assertIn("cliente", resposta.json())
+        self.assertIn("cliente", resposta.json()["fields"])
         self.assertFalse(Agendamento.objects.exists())
 
         corpo["cliente"] = criar_cliente(self.b).pk
         corpo["servico"] = self.servico_a.pk
         resposta = self.client_b.post("/agendamentos/", corpo, format="json")
         self.assertEqual(resposta.status_code, 400)
-        self.assertIn("servico", resposta.json())
+        self.assertIn("servico", resposta.json()["fields"])
 
     def test_criar_com_fks_do_proprio_tenant_funciona(self):
         corpo = {

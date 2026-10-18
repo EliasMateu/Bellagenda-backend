@@ -1,6 +1,7 @@
 """Configuracoes do Bela Agenda. Valores sensiveis vem de variaveis de ambiente."""
 
 import os
+import sys
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -98,6 +99,14 @@ DATABASES = {
     }
 }
 
+# Permite que mais de um executor use o mesmo PostgreSQL sem colidir no banco de testes.
+if os.environ.get("POSTGRES_TEST_DB"):
+    DATABASES["default"]["TEST"] = {"NAME": os.environ["POSTGRES_TEST_DB"]}
+
+# Somente ao rodar os testes: hash rapido para nao deixar a suite lenta.
+if len(sys.argv) > 1 and sys.argv[1] == "test":
+    PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
@@ -118,4 +127,28 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
+    "EXCEPTION_HANDLER": "apps.core.exceptions.tratar_excecao",
 }
+
+# Cache em tabela (sem Redis), usado pelo limite de requisicoes. Crie a tabela com
+# `DJANGO_DB_ROLE=owner python manage.py createcachetable`. MAX_ENTRIES alto evita que o
+# culling descarte contadores sob ataque.
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.db.DatabaseCache",
+        "LOCATION": "cache_throttle",
+        "OPTIONS": {"MAX_ENTRIES": 100000},
+    }
+}
+
+# Limite de requisicoes da API publica: (maximo, janela em segundos). Contadores em janela fixa.
+LIMITES_PUBLICOS = {
+    "ip_post": (10, 3600),        # POSTs publicos por IP
+    "telefone": (5, 3600),        # criacoes de agendamento por telefone
+    "tenant": (30, 3600),         # POSTs publicos por profissional (slug)
+    "consulta": (5, 3600),        # consultar/cancelar por IP + slug
+}
+
+# IP do cliente: por ora REMOTE_ADDR. Quando o proxy da Vercel/Caddy estiver na frente, o IP real
+# virira de X-Forwarded-For; so confie nesse cabecalho contando NUM_PROXIES saltos confiaveis.
+NUM_PROXIES = 0

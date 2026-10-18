@@ -126,6 +126,8 @@ class Agendamento(TenantModel):
     # sha256 hex do token do link publico; o token em si nunca e guardado.
     token_hash = models.CharField(max_length=64, unique=True)
     origem = models.CharField(max_length=10, choices=Origem.choices, default=Origem.ONLINE)
+    # Recado deixado pelo cliente no agendamento publico (nao altera o cadastro do cliente).
+    observacao_cliente = models.CharField(max_length=500, blank=True)
     criado_em = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
 
