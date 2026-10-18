@@ -1,7 +1,11 @@
-"""Isolamento por profissional (tenant) para as APIs do painel."""
+"""Isolamento por profissional (tenant) para as APIs do painel.
+
+Falha fechado: sem request/profissional, campos relacionais nao filtrados ou serializers aninhados
+gravaveis, o codigo levanta ImproperlyConfigured em vez de aceitar dados de outro tenant.
+"""
 
 from django.core.exceptions import ImproperlyConfigured
-from django.db import models
+from django.db import models, transaction
 from rest_framework import permissions, serializers, viewsets
 from rest_framework.authentication import SessionAuthentication
 
@@ -22,36 +26,65 @@ class ProfissionalAtiva(permissions.BasePermission):
         return profissional.status == Profissional.Status.ATIVA
 
 
+def _valores(valor):
+    if isinstance(valor, (list, tuple, set)):
+        yield from valor
+    else:
+        yield valor
+
+
 class TenantSerializer(serializers.ModelSerializer):
     """Serializer base: FKs recebidas devem pertencer a mesma profissional da requisicao.
 
-    Nao inclua `profissional` em `fields`: ele e injetado pelo ViewSet.
+    O campo `profissional` nunca e gravavel pelo cliente: e removido dos campos e o ViewSet o
+    injeta no save().
     """
 
     def _profissional(self):
         request = self.context.get("request")
-        return request.user.profissional if request else None
+        user = getattr(request, "user", None)
+        profissional = None
+        if user is not None and user.is_authenticated:
+            profissional = getattr(user, "profissional", None)
+        if profissional is None:
+            raise ImproperlyConfigured(
+                f"{type(self).__name__} exige context['request'] de um usuario com Profissional."
+            )
+        return profissional
 
     def get_fields(self):
         fields = super().get_fields()
+        fields.pop("profissional", None)
         profissional = self._profissional()
-        if profissional is not None:
-            # Reduz as opcoes validas das FKs ao tenant: id de outro tenant vira "nao existe".
-            for field in fields.values():
-                queryset = getattr(field, "queryset", None)
-                if isinstance(queryset, models.QuerySet) and hasattr(queryset, "do_profissional"):
-                    field.queryset = queryset.do_profissional(profissional)
+        for nome, field in fields.items():
+            if isinstance(field, serializers.BaseSerializer) and not field.read_only:
+                raise ImproperlyConfigured(
+                    f"{type(self).__name__}.{nome}: serializers aninhados gravaveis nao sao suportados."
+                )
+            relacao = field.child_relation if isinstance(field, serializers.ManyRelatedField) else field
+            if not isinstance(relacao, serializers.RelatedField):
+                continue
+            queryset = relacao.queryset
+            if queryset is None:  # somente leitura
+                continue
+            if hasattr(queryset, "do_profissional"):
+                # Reduz as opcoes validas ao tenant: id de outro tenant vira "nao existe".
+                relacao.queryset = queryset.do_profissional(profissional)
+            elif any(f.name == "profissional" for f in queryset.model._meta.get_fields()):
+                raise ImproperlyConfigured(
+                    f"{type(self).__name__}.{nome}: o modelo relacionado deve usar TenantQuerySet."
+                )
         return fields
 
     def validate(self, attrs):
         attrs = super().validate(attrs)
         profissional = self._profissional()
-        if profissional is not None:
-            for nome, valor in attrs.items():
+        for nome, valor in attrs.items():
+            for item in _valores(valor):
                 if (
-                    isinstance(valor, models.Model)
-                    and hasattr(valor, "profissional_id")
-                    and valor.profissional_id != profissional.pk
+                    isinstance(item, models.Model)
+                    and hasattr(item, "profissional_id")
+                    and item.profissional_id != profissional.pk
                 ):
                     raise serializers.ValidationError(
                         {nome: "Registro nao pertence a esta profissional."}
@@ -63,6 +96,8 @@ class TenantModelViewSet(viewsets.ModelViewSet):
     """ViewSet base do painel: sempre filtrado pela profissional logada.
 
     Objeto de outro tenant nao e encontrado no queryset, entao a resposta e 404 (nunca 403).
+    Escritas rodam em savepoint para que violacoes de constraint virem erros 400/409 padronizados
+    (ver apps/core/exceptions.py) em vez de 500.
     """
 
     authentication_classes = [SessionAuthentication]
@@ -77,4 +112,13 @@ class TenantModelViewSet(viewsets.ModelViewSet):
         return queryset.do_profissional(self.request.user.profissional)
 
     def perform_create(self, serializer):
-        serializer.save(profissional=self.request.user.profissional)
+        with transaction.atomic():
+            serializer.save(profissional=self.request.user.profissional)
+
+    def perform_update(self, serializer):
+        with transaction.atomic():
+            serializer.save(profissional=self.request.user.profissional)
+
+    def perform_destroy(self, instance):
+        with transaction.atomic():
+            instance.delete()

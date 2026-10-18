@@ -76,3 +76,18 @@ class LimiteConsultaPorIPeSlug(LimiteJanelaFixa):
 
     def identificador(self, request, view):
         return f"{ip_do_cliente(request)}|{str(view.kwargs.get('slug', '')).lower()}"
+
+
+class LimiteLoginPorIP(LimiteJanelaFixa):
+    escopo = "login_ip"
+
+    def identificador(self, request, view):
+        return ip_do_cliente(request)
+
+
+class LimiteLoginPorUsuario(LimiteJanelaFixa):
+    escopo = "login_usuario"
+
+    def identificador(self, request, view):
+        usuario = request.data.get("username") if hasattr(request.data, "get") else None
+        return str(usuario).strip().lower() if usuario else None

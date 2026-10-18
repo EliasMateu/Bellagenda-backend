@@ -6,8 +6,9 @@ from django.contrib.postgres.fields import DateTimeRangeField, RangeBoundary, Ra
 from django.core.exceptions import ValidationError
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models.functions import Length
 
-from apps.core.models import TenantModel
+from apps.core.models import TenantModel, TenantQuerySet
 
 from .tokens import gerar_codigo_curto
 
@@ -93,7 +94,21 @@ class Bloqueio(TenantModel):
             raise ValidationError({"fim": "O fim deve ser depois do inicio."})
 
 
+class TransicaoAgendamentoInvalida(ValidationError):
+    """Mudanca de status nao permitida pela matriz de transicoes."""
+
+
+class AgendamentoQuerySet(TenantQuerySet):
+    def update(self, **kwargs):
+        """Recusa mexer em inicio/fim sem recalcular fim_ocupado (mantem a exclusao correta)."""
+        if ("inicio" in kwargs or "fim" in kwargs) and "fim_ocupado" not in kwargs:
+            raise ValueError("update() de inicio/fim exige informar fim_ocupado; use save().")
+        return super().update(**kwargs)
+
+
 class Agendamento(TenantModel):
+    objects = AgendamentoQuerySet.as_manager()
+
     class Status(models.TextChoices):
         PENDENTE = "pendente", "Pendente"
         CONFIRMADO = "confirmado", "Confirmado"
@@ -105,6 +120,15 @@ class Agendamento(TenantModel):
     class Origem(models.TextChoices):
         ONLINE = "online", "Online"
         BALCAO = "balcao", "Balcao"
+
+    # Pendente -> confirmado | cancelado_salao; confirmado -> concluido | falta | cancelado_*.
+    # Estados finais nao mudam.
+    TRANSICOES = {
+        Status.PENDENTE: {Status.CONFIRMADO, Status.CANCELADO_SALAO},
+        Status.CONFIRMADO: {
+            Status.CONCLUIDO, Status.FALTA, Status.CANCELADO_SALAO, Status.CANCELADO_CLIENTE,
+        },
+    }
 
     cliente = models.ForeignKey(
         "clientes.Cliente", on_delete=models.PROTECT, related_name="agendamentos"
@@ -140,6 +164,14 @@ class Agendamento(TenantModel):
             ),
             models.CheckConstraint(
                 condition=models.Q(fim__gt=models.F("inicio")), name="agendamento_fim_apos_inicio"
+            ),
+            models.CheckConstraint(
+                condition=models.Q(fim_ocupado__gte=models.F("fim")),
+                name="agendamento_fim_ocupado_ok",
+            ),
+            models.CheckConstraint(
+                condition=models.lookups.Exact(Length("token_hash"), 64),
+                name="agendamento_token_hash_64",
             ),
             # Conflito de horario garantido pelo PostgreSQL (D-14/D-20): na mesma profissional,
             # intervalos [inicio, fim_ocupado) ativos nao podem se sobrepor.
@@ -185,6 +217,15 @@ class Agendamento(TenantModel):
         if update_fields is not None:
             kwargs["update_fields"] = {*update_fields, "fim_ocupado", "codigo_curto"}
         super().save(*args, **kwargs)
+
+    def aplicar_status(self, novo_status):
+        """Muda o status seguindo a matriz de transicoes ou levanta TransicaoAgendamentoInvalida."""
+        if novo_status not in self.TRANSICOES.get(self.status, set()):
+            raise TransicaoAgendamentoInvalida(
+                f"Transicao invalida: {self.status} -> {novo_status}.", code="transicao_invalida"
+            )
+        self.status = novo_status
+        self.save(update_fields=["status", "atualizado_em"])
 
     def _novo_codigo_curto(self):
         for _ in range(10):
