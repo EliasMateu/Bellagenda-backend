@@ -62,6 +62,11 @@ exibicao), `profissional_telefone`, `cliente{nome, telefone mascarado}`, `cancel
 `null` se vazio/invalido; e publico por decisao do usuario (D-32), so aparece na consulta bem-sucedida (nunca na
 criacao, em servicos, horarios ou nos 404). O telefone da cliente segue mascarado.
 
+Limites de consultar/cancelar (por hora): identificando por **token** (tem precedencia se vier junto com codigo),
+120 por IP+slug (`consulta_token`) e 600 por profissional (`tenant_consulta_token`, separado da criacao); toda tentativa
+conta, inclusive token invalido. Identificando por **codigo+telefone**: 5 por IP+slug (`consulta`) e 30 por profissional
+(`tenant`, compartilhado com a criacao). Numeros e motivos em `LIMITES_PUBLICOS` (settings.py).
+
 Erros no formato `{code, message, fields}`. O limite de requisicoes usa cache em tabela:
 crie-a uma vez com `DJANGO_DB_ROLE=owner python manage.py createcachetable` (os testes a criam sozinhos).
 Limites em `LIMITES_PUBLICOS` (settings.py); o IP e o `REMOTE_ADDR` por enquanto (ver `NUM_PROXIES`).
