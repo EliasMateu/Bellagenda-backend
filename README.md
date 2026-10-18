@@ -74,3 +74,24 @@ de testes proprio: `DJANGO_DB_ROLE=owner POSTGRES_TEST_DB=test_forja python mana
   `agendamentos` (`?de=&ate=&status=`; acoes POST `confirmar`, `recusar`, `cancelar`, `concluir`, `faltou`, `remarcar`).
 - Cookies: `DJANGO_SESSION_COOKIE_SECURE`, `DJANGO_CSRF_COOKIE_SECURE` (True em producao) e `DJANGO_CSRF_TRUSTED_ORIGINS`.
 - Use `--noinput` ao rodar testes sem terminal (`manage.py test --noinput`), para recriar o banco de testes sem perguntar.
+
+## Backoffice (aprovacao de contas)
+
+Django admin restrito em `/<DJANGO_ADMIN_PATH>/` (padrao de desenvolvimento: `gestao-interna/`; **em producao defina um
+valor proprio e nao obvio**). Somente superusuario ativo entra: anonimo vai ao login do admin; usuario comum e staff
+sem superuser recebem 404. So `Profissional` esta registrado (clientes, agendamentos e servicos nao aparecem, por
+LGPD/menor privilegio), em modo somente leitura, sem adicionar/excluir. O status muda apenas pelas acoes
+**aprovar**, **rejeitar** (pede motivo), **suspender** (pede motivo) e **reativar**, que respeitam a matriz de
+transicoes e ficam no historico do admin (LogEntry) alem de `aprovado_por`/`aprovado_em`/`motivo_status`.
+
+Comandos de gestao (a senha nunca vai por argumento: terminal interativo ou `DJANGO_PROFISSIONAL_PASSWORD`):
+
+```bash
+DJANGO_PROFISSIONAL_PASSWORD='...' python manage.py criar_profissional --username maria --nome "Maria Lima" \
+    --telefone "(11) 99876-5432" --slug maria-lima [--ativa --aprovado-por ADMIN] [--horarios-padrao]
+python manage.py alterar_slug --slug-atual maria-lima --novo-slug maria-nails --por ADMIN
+```
+
+Em producao: rode `python manage.py collectstatic` (os estaticos do admin precisam ser servidos pelo Caddy/WhiteNoise
+a partir de `STATIC_ROOT`). Pendente: protecao contra forca bruta no login do admin (o limite de login existe so na API)
+e o link de redefinicao de senha.
