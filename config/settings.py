@@ -165,8 +165,12 @@ CACHES = {
 LIMITES_PUBLICOS = {
     "ip_post": (10, 3600),        # POSTs publicos por IP
     "telefone": (5, 3600),        # criacoes de agendamento por telefone
-    "tenant": (30, 3600),         # POSTs publicos por profissional (slug)
-    "consulta": (5, 3600),        # consultar/cancelar por IP + slug
+    "tenant": (30, 3600),         # POSTs publicos por profissional (slug); criacao e consulta por codigo+telefone
+    "consulta": (5, 3600),        # consultar/cancelar por CODIGO+TELEFONE, por IP + slug (forca bruta)
+    # Consultar/cancelar identificando por TOKEN (256 bits, inviavel de adivinhar): cada abertura das paginas
+    # de detalhes e publica consulta o token, entao os tetos sao generosos; toda tentativa conta (inclusive invalida).
+    "consulta_token": (120, 3600),         # por IP + slug
+    "tenant_consulta_token": (600, 3600),  # por profissional; separado do "tenant" para nao consumir a criacao
     # Login: contam apenas FALHAS de autenticacao.
     "login_usuario_ip": (5, 3600),  # estrita: username + IP
     "login_usuario": (50, 3600),    # frouxa: username em qualquer IP

@@ -17,6 +17,7 @@ from apps.contas.models import Profissional
 from apps.core.exceptions import ErroApi, NaoEncontrado
 from apps.core.throttles import (
     LimiteConsultaPorIPeSlug,
+    LimiteConsultaPorTenant,
     LimitePorIP,
     LimitePorTelefone,
     LimitePorTenant,
@@ -302,7 +303,7 @@ def _limite_cancelamento(agendamento, config):
 
 
 class ConsultarAgendamentoView(PublicoView):
-    throttle_classes = [LimiteConsultaPorIPeSlug, LimitePorTenant]
+    throttle_classes = [LimiteConsultaPorIPeSlug, LimiteConsultaPorTenant]
 
     def post(self, request, slug):
         profissional = obter_profissional_ativa(slug)
@@ -337,7 +338,7 @@ class ConsultarAgendamentoView(PublicoView):
 
 
 class CancelarAgendamentoView(PublicoView):
-    throttle_classes = [LimiteConsultaPorIPeSlug, LimitePorTenant]
+    throttle_classes = [LimiteConsultaPorIPeSlug, LimiteConsultaPorTenant]
 
     def post(self, request, slug):
         profissional = obter_profissional_ativa(slug)

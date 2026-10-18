@@ -587,16 +587,59 @@ class LimiteDeRequisicoesTests(PublicoMixin, TestCase):
             self.assertEqual(self.agendar(self.horas[8], telefone=TEL_2).status_code, 201)
             self.assertEqual(self.agendar(self.horas[16], telefone="11 97777-1111").status_code, 429)
 
-    def test_consulta_e_cancelamento_5_por_hora_por_ip_e_slug(self):
-        with self._limites(consulta=(5, 3600)):
+    def _post(self, acao, corpo, client=None):
+        return (client or self.client).post(self.url(f"agendamento/{acao}/"), corpo, format="json")
+
+    def _limites_reais(self, **alterados):
+        from config import settings as cfg
+
+        return override_settings(LIMITES_PUBLICOS={**cfg.LIMITES_PUBLICOS, **alterados})
+
+    def test_codigo_e_telefone_continua_5_por_hora_por_ip_e_slug(self):
+        corpo = {"codigo": "AAAAAAAA", "telefone": TEL}
+        with self._limites_reais():
             for _ in range(5):
-                self.assertEqual(
-                    self.client.post(self.url("agendamento/consultar/"), {"token": "x"}, format="json").status_code,
-                    404,
-                )
-            resposta = self.client.post(self.url("agendamento/cancelar/"), {"token": "x"}, format="json")
+                self.assertEqual(self._post("consultar", corpo).status_code, 404)
+            resposta = self._post("cancelar", corpo)
             self.assertEqual(resposta.status_code, 429)
             self.assertEqual(resposta.json()["code"], "limite_requisicoes")
+            outro = APIClient(REMOTE_ADDR="10.9.9.9")
+            self.assertEqual(self._post("consultar", corpo, outro).status_code, 404)
+
+    def test_token_valido_consulta_20_vezes_e_cancela_depois(self):
+        token = self.agendar(self.horas[0]).json()["agendamento"]["token"]
+        with self._limites_reais():
+            for _ in range(20):
+                self.assertEqual(self._post("consultar", {"token": token}).status_code, 200)
+            self.assertEqual(self._post("cancelar", {"token": token}).status_code, 200)
+
+    def test_token_invalido_so_e_limitado_apos_o_novo_limite(self):
+        with self._limites_reais(consulta_token=(10, 3600)):
+            for _ in range(10):
+                self.assertEqual(self._post("consultar", {"token": "x"}).status_code, 404)
+            self.assertEqual(self._post("consultar", {"token": "x"}).status_code, 429)
+            self.assertEqual(self._post("cancelar", {"token": "x"}).status_code, 429)
+
+    def test_token_e_codigo_juntos_contam_como_token(self):
+        corpo = {"token": "x", "codigo": "AAAAAAAA", "telefone": TEL}
+        with self._limites_reais():
+            for _ in range(6):
+                self.assertEqual(self._post("consultar", corpo).status_code, 404)
+
+    def test_token_nao_string_cai_no_limite_estrito(self):
+        with self._limites_reais():
+            for _ in range(5):
+                self._post("consultar", {"token": 123, "codigo": "AAAAAAAA", "telefone": TEL})
+            self.assertEqual(
+                self._post("consultar", {"token": 123, "codigo": "AAAAAAAA", "telefone": TEL}).status_code, 429
+            )
+
+    def test_tenant_consulta_por_token_nao_consome_a_criacao(self):
+        with self._limites_reais(tenant=(2, 3600), tenant_consulta_token=(3, 3600), consulta_token=(100, 3600)):
+            for _ in range(3):
+                self.assertEqual(self._post("consultar", {"token": "x"}).status_code, 404)
+            self.assertEqual(self._post("consultar", {"token": "x"}).status_code, 429)
+            self.assertEqual(self.agendar(self.horas[0]).status_code, 201)  # criacao segue com o proprio teto
 
     def test_gets_nao_sao_limitados(self):
         with self._limites(ip_post=(1, 3600), tenant=(1, 3600)):

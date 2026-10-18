@@ -27,16 +27,20 @@ class LimiteJanelaFixa(BaseThrottle):
     def identificador(self, request, view):
         raise NotImplementedError
 
+    def escopo_da_requisicao(self, request):
+        return self.escopo
+
     def allow_request(self, request, view):
         if request.method not in self.metodos:
             return True
         ident = self.identificador(request, view)
         if ident is None:
             return True
-        maximo, janela = settings.LIMITES_PUBLICOS[self.escopo]
+        escopo = self.escopo_da_requisicao(request)
+        maximo, janela = settings.LIMITES_PUBLICOS[escopo]
         agora = time.time()
         balde = int(agora // janela)
-        bruto = f"{self.escopo}:{ident}"
+        bruto = f"{escopo}:{ident}"
         chave = f"thr:{hashlib.sha256(bruto.encode()).hexdigest()}:{balde}"
         total = (cache.get(chave) or 0) + 1
         cache.set(chave, total, timeout=janela)
@@ -72,11 +76,39 @@ class LimitePorTelefone(LimiteJanelaFixa):
             return None
 
 
+def identificacao_por_token(request):
+    """True se o corpo identifica o agendamento por token (token tem precedencia sobre codigo+telefone).
+
+    Mesma regra do serializer (string nao vazia apos strip); qualquer outro formato cai no limite estrito.
+    """
+    dados = request.data
+    token = dados.get("token") if hasattr(dados, "get") else None
+    return isinstance(token, str) and bool(token.strip())
+
+
 class LimiteConsultaPorIPeSlug(LimiteJanelaFixa):
+    """Consultar/cancelar: por token (inviavel de adivinhar) o limite e generoso; por codigo+telefone, estrito.
+
+    Toda tentativa conta, inclusive token invalido, para frear adivinhacao em massa.
+    """
+
     escopo = "consulta"
+    escopo_token = "consulta_token"
+
+    def escopo_da_requisicao(self, request):
+        return self.escopo_token if identificacao_por_token(request) else self.escopo
 
     def identificador(self, request, view):
         return f"{ip_do_cliente(request)}|{str(view.kwargs.get('slug', '')).lower()}"
+
+
+class LimiteConsultaPorTenant(LimitePorTenant):
+    """Por token, o teto por profissional e alto e separado do de criacao; por codigo+telefone segue o de tenant."""
+
+    escopo_token = "tenant_consulta_token"
+
+    def escopo_da_requisicao(self, request):
+        return self.escopo_token if identificacao_por_token(request) else self.escopo
 
 
 class LimiteFalhasLogin:
