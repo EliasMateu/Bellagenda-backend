@@ -139,7 +139,7 @@ class CriarProfissionalTests(TestCase):
 
     def test_atomico_se_falhar_no_meio_nada_fica(self):
         with mock.patch(
-            "apps.contas.management.commands.criar_profissional.HorarioTrabalho.objects.create",
+            "apps.agenda.models.HorarioTrabalho.objects.create",
             side_effect=RuntimeError("falha"),
         ):
             with self.assertRaises(RuntimeError):

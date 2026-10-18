@@ -125,6 +125,13 @@ USE_TZ = True
 
 # Caminho do backoffice (Django admin). Em producao DEFINA DJANGO_ADMIN_PATH com um valor proprio e
 # nao obvio; o padrao abaixo e apenas para desenvolvimento.
+# Cadastro aberto de profissionais (D-19/D-21): desligado por padrao ate o MVP-2.
+CADASTRO_ABERTO = _booleano(os.environ.get("DJANGO_CADASTRO_ABERTO", "False"))
+# Teto de contas pendentes de aprovacao; ao atingir, novos cadastros recebem 409.
+CADASTRO_MAX_PENDENTES = int(os.environ.get("DJANGO_CADASTRO_MAX_PENDENTES", "50"))
+# Versao vigente dos termos; o cadastro so aceita o aceite dessa versao.
+TERMOS_VERSAO_ATUAL = os.environ.get("DJANGO_TERMOS_VERSAO", "2026-10-provisorio")
+
 ADMIN_PATH = os.environ.get("DJANGO_ADMIN_PATH", "").strip().strip("/") or "gestao-interna"
 ADMIN_PATH += "/"
 
@@ -171,6 +178,9 @@ LIMITES_PUBLICOS = {
     # de detalhes e publica consulta o token, entao os tetos sao generosos; toda tentativa conta (inclusive invalida).
     "consulta_token": (120, 3600),         # por IP + slug
     "tenant_consulta_token": (600, 3600),  # por profissional; separado do "tenant" para nao consumir a criacao
+    # Cadastro aberto (D-33), por IP.
+    "cadastro_ip": (3, 3600),     # POST /cadastro/
+    "cadastro_slug": (30, 3600),  # GET /cadastro/slug/
     # Login: contam apenas FALHAS de autenticacao.
     "login_usuario_ip": (5, 3600),  # estrita: username + IP
     "login_usuario": (50, 3600),    # frouxa: username em qualquer IP

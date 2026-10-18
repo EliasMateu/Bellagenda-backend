@@ -86,6 +86,32 @@ de testes proprio: `DJANGO_DB_ROLE=owner POSTGRES_TEST_DB=test_forja python mana
 - Cookies: `DJANGO_SESSION_COOKIE_SECURE`, `DJANGO_CSRF_COOKIE_SECURE` (True em producao) e `DJANGO_CSRF_TRUSTED_ORIGINS`.
 - Use `--noinput` ao rodar testes sem terminal (`manage.py test --noinput`), para recriar o banco de testes sem perguntar.
 
+## Cadastro aberto (D-19/D-21/D-33)
+
+Controlado por `DJANGO_CADASTRO_ABERTO` (padrao `False`; fechado => `config.aberto=false` e o POST responde 403
+`cadastro_fechado`). Variaveis: `DJANGO_CADASTRO_MAX_PENDENTES` (padrao 50; ao atingir, 409 `limite_contas_pendentes`)
+e `DJANGO_TERMOS_VERSAO` (padrao `2026-10-provisorio`; o aceite precisa ser desta versao). Sem login.
+
+- `GET /api/v1/cadastro/config/` -> `{aberto, termos_versao}`
+- `GET /api/v1/cadastro/slug/?slug=` -> sempre 200 `{disponivel, motivo: null|invalido|reservado|em_uso}`
+  (30/hora por IP; nao diz o status nem de quem e o slug, so `em_uso`)
+- `POST /api/v1/cadastro/` `{username, password, nome_exibicao, telefone, slug, aceite_termos: true, termos_versao,
+  website: ""}` -> 201 `{status: "pendente"}` (3/hora por IP). Cria `User` comum + `Profissional` pendente, sem login
+  automatico. Erros: 400 `validacao` (com `fields`), 403, 409, 429 (`Retry-After`). `website` e uma isca: preenchido
+  => 400 generico sem criar. Username 3-30 `[a-z0-9._-]` (minusculo), nome 2-100, telefone E.164, senha pelos
+  validadores do Django e sem conter o username. Corridas de usuario/slug viram 400 padronizado.
+
+## API do backoffice (superusuario ativo por sessao)
+
+Login em `/api/v1/auth/login/`; POST exige `X-CSRFToken`. Anonimo, profissional e staff sem superuser recebem o mesmo
+404. Nunca expoe clientes, agendamentos, servicos nem senhas.
+
+- `GET /api/v1/backoffice/contas/?status=&q=` -> `{contagens: {pendente, ativa, suspensa, rejeitada}, resultados: [...]}`
+  (pendentes primeiro, mais antigos antes; depois as mais recentes; `q` busca nome, usuario, slug e telefone).
+- `POST /api/v1/backoffice/contas/<id>/<aprovar|rejeitar|suspender|reativar>/` `{motivo?}` -> conta atualizada.
+  `rejeitar` e `suspender` exigem motivo (min. 3); 409 `transicao_invalida` fora da matriz; 404 se nao existe.
+  Usa o mesmo servico do admin (`apps/contas/servicos.py`): lock de linha, `mudar_status` e `LogEntry` unico.
+
 ## Backoffice (aprovacao de contas)
 
 Django admin restrito em `/<DJANGO_ADMIN_PATH>/` (padrao de desenvolvimento: `gestao-interna/`; **em producao defina um

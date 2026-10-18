@@ -24,3 +24,11 @@ def normalizar_telefone_br(valor):
     candidato = "+55" + digitos
     validar_telefone_e164(candidato)
     return candidato
+
+
+def telefone_e164_ou_none(valor):
+    """E.164 se o valor for um telefone brasileiro valido; None se vazio ou invalido."""
+    try:
+        return normalizar_telefone_br(valor)
+    except ValidationError:
+        return None
