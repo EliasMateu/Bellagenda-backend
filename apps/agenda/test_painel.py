@@ -336,6 +336,7 @@ class MatrizTransicoesTests(PainelBase):
         ("pendente", "confirmar", {}, "confirmado"),
         ("pendente", "recusar", {}, "cancelado_salao"),
         ("pendente", "cancelar", {}, "cancelado_salao"),
+        ("pendente", "cancelar", {"origem": "cliente"}, "cancelado_cliente"),
         ("pendente", "concluir", {}, None),
         ("pendente", "faltou", {}, None),
         ("confirmado", "confirmar", {}, None),

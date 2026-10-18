@@ -111,44 +111,145 @@ class LoginTests(TestCase):
 
 
 class LoginThrottleTests(TestCase):
+    """Limite de login: conta SOMENTE falhas de autenticacao (sucesso, CSRF/corpo invalidos nao contam)."""
+
     def setUp(self):
         criar_profissional("calita")
         self.client = APIClient(enforce_csrf_checks=True)
 
-    def tentar(self, username, client=None):
+    def tentar(self, username, senha="errada", client=None):
         client = client or self.client
         return client.post(
-            "/api/v1/auth/login/", {"username": username, "password": "errada"},
+            "/api/v1/auth/login/", {"username": username, "password": senha},
             format="json", **csrf(client),
         )
 
-    def test_limite_por_ip(self):
-        limites = {**LIMITES_ALTOS, "login_ip": (3, 3600)}
-        with override_settings(LIMITES_PUBLICOS=limites):
-            for i in range(3):
-                self.assertEqual(self.tentar(f"user-{i}").status_code, 401)
-            resposta = self.tentar("outro")
+    def de_ip(self, n):
+        return APIClient(enforce_csrf_checks=True, REMOTE_ADDR=f"10.0.0.{n}")
+
+    def test_falhas_estouram_a_chave_estrita_usuario_mais_ip(self):
+        with override_settings(LIMITES_PUBLICOS={**LIMITES_ALTOS, "login_usuario_ip": (3, 3600)}):
+            for _ in range(3):
+                self.assertEqual(self.tentar("user-calita").status_code, 401)
+            resposta = self.tentar("user-calita")
             self.assertEqual(resposta.status_code, 429)
             self.assertEqual(resposta.json()["code"], "limite_requisicoes")
-            outro_ip = APIClient(enforce_csrf_checks=True, REMOTE_ADDR="10.1.1.1")
-            self.assertEqual(self.tentar("outro", outro_ip).status_code, 401)
+            self.assertIn("Retry-After", resposta)
+            # quem estourou o limite fica bloqueado tambem com a senha certa (so nessa chave)
+            self.assertEqual(self.tentar("user-calita", SENHA).status_code, 429)
+            # mesmo username vindo de outro IP e outro username do mesmo IP seguem livres
+            self.assertEqual(self.tentar("user-calita", SENHA, self.de_ip(9)).status_code, 200)
+            self.assertEqual(self.tentar("outro-usuario").status_code, 401)
 
-    def test_limite_por_username_mesmo_trocando_de_ip(self):
-        limites = {**LIMITES_ALTOS, "login_usuario": (2, 3600)}
-        with override_settings(LIMITES_PUBLICOS=limites):
-            for i in range(2):
-                ip = APIClient(enforce_csrf_checks=True, REMOTE_ADDR=f"10.0.0.{i + 1}")
-                self.assertEqual(self.tentar("user-calita", ip).status_code, 401)
-            ip3 = APIClient(enforce_csrf_checks=True, REMOTE_ADDR="10.0.0.9")
-            self.assertEqual(self.tentar("USER-calita", ip3).status_code, 429)
-            self.assertEqual(self.tentar("user-diferente", ip3).status_code, 401)
+    def test_dez_falhas_anonimas_nao_impedem_o_login_legitimo_de_outro_ip(self):
+        # limites padrao: estrita 5, por username 50, por IP 30
+        for n in range(10):
+            self.assertEqual(self.tentar("user-calita", client=self.de_ip(n + 1)).status_code, 401)
+        legitimo = self.de_ip(200)
+        self.assertEqual(self.tentar("user-calita", SENHA, legitimo).status_code, 200)
 
-    def test_senha_correta_tambem_e_bloqueada_ao_estourar_o_limite(self):
-        limites = {**LIMITES_ALTOS, "login_usuario": (1, 3600)}
-        with override_settings(LIMITES_PUBLICOS=limites):
+    def test_cinco_falhas_do_atacante_nao_travam_a_vitima_em_outro_ip(self):
+        atacante = self.de_ip(66)
+        for _ in range(5):
+            self.assertEqual(self.tentar("user-calita", client=atacante).status_code, 401)
+        self.assertEqual(self.tentar("user-calita", client=atacante).status_code, 429)
+        self.assertEqual(self.tentar("user-calita", SENHA, self.de_ip(77)).status_code, 200)
+
+    def test_sucesso_nao_conta_e_zera_a_chave_estrita(self):
+        with override_settings(LIMITES_PUBLICOS={**LIMITES_ALTOS, "login_usuario_ip": (3, 3600),
+                                                 "login_usuario": (3, 3600), "login_ip": (3, 3600)}):
+            for _ in range(10):  # muitos logins corretos nunca bloqueiam
+                self.assertEqual(self.tentar("user-calita", SENHA).status_code, 200)
+        with override_settings(LIMITES_PUBLICOS={**LIMITES_ALTOS, "login_usuario_ip": (3, 3600)}):
             self.tentar("user-calita")
-            resposta = self.client.post(
-                "/api/v1/auth/login/", {"username": "user-calita", "password": SENHA},
-                format="json", **csrf(self.client),
-            )
-            self.assertEqual(resposta.status_code, 429)
+            self.tentar("user-calita")
+            self.assertEqual(self.tentar("user-calita", SENHA).status_code, 200)  # zera
+            self.tentar("user-calita")
+            self.tentar("user-calita")
+            self.assertEqual(self.tentar("user-calita").status_code, 401)  # ainda abaixo do limite
+
+    def test_requisicoes_sem_csrf_ou_com_corpo_invalido_nao_contam(self):
+        with override_settings(LIMITES_PUBLICOS={**LIMITES_ALTOS, "login_usuario_ip": (2, 3600),
+                                                 "login_usuario": (2, 3600), "login_ip": (2, 3600)}):
+            for _ in range(10):
+                sem_csrf = self.client.post(
+                    "/api/v1/auth/login/", {"username": "user-calita", "password": "x"}, format="json"
+                )
+                self.assertEqual(sem_csrf.status_code, 403)
+                invalido = self.client.post(
+                    "/api/v1/auth/login/", {"username": "user-calita"}, format="json", **csrf(self.client)
+                )
+                self.assertEqual(invalido.status_code, 400)
+            self.assertEqual(self.tentar("user-calita").status_code, 401)  # nenhuma contada antes
+            self.assertEqual(self.tentar("user-calita", SENHA).status_code, 200)
+
+    def test_limite_por_username_em_qualquer_ip(self):
+        with override_settings(LIMITES_PUBLICOS={**LIMITES_ALTOS, "login_usuario": (3, 3600)}):
+            for n in range(3):
+                self.assertEqual(self.tentar("USER-calita", client=self.de_ip(n + 1)).status_code, 401)
+            self.assertEqual(self.tentar("user-calita", client=self.de_ip(50)).status_code, 429)
+            self.assertEqual(self.tentar("user-diferente", client=self.de_ip(50)).status_code, 401)
+
+    def test_limite_por_ip_isolado_com_varios_usernames(self):
+        with override_settings(LIMITES_PUBLICOS={**LIMITES_ALTOS, "login_ip": (3, 3600)}):
+            for i in range(3):
+                self.assertEqual(self.tentar(f"user-{i}").status_code, 401)
+            self.assertEqual(self.tentar("novo-usuario").status_code, 429)
+            self.assertEqual(self.tentar("novo-usuario", client=self.de_ip(8)).status_code, 401)
+
+    def test_usuario_inativo_conta_como_falha(self):
+        inativa = criar_profissional("inativa-x")
+        inativa.user.is_active = False
+        inativa.user.save()
+        with override_settings(LIMITES_PUBLICOS={**LIMITES_ALTOS, "login_usuario_ip": (2, 3600)}):
+            self.assertEqual(self.tentar("user-inativa-x", SENHA).status_code, 401)
+            self.assertEqual(self.tentar("user-inativa-x", SENHA).status_code, 401)
+            self.assertEqual(self.tentar("user-inativa-x", SENHA).status_code, 429)
+
+
+@override_settings(LIMITES_PUBLICOS=LIMITES_ALTOS)
+class SessaoTests(TestCase):
+    def setUp(self):
+        criar_profissional("calita")
+
+    def login(self, client):
+        token = client.get("/api/v1/auth/csrf/").json()["csrfToken"]
+        return client.post(
+            "/api/v1/auth/login/", {"username": "user-calita", "password": SENHA},
+            format="json", HTTP_X_CSRFTOKEN=token,
+        )
+
+    def test_login_gira_a_chave_de_sessao_e_o_csrf(self):
+        from importlib import import_module
+
+        client = APIClient(enforce_csrf_checks=True)
+        engine = import_module(settings.SESSION_ENGINE)
+        antiga = engine.SessionStore()
+        antiga["visitante"] = True
+        antiga.save()
+        chave_antiga = antiga.session_key
+        client.cookies[settings.SESSION_COOKIE_NAME] = chave_antiga
+        client.get("/api/v1/auth/csrf/")
+        csrf_antes = client.cookies["csrftoken"].value
+
+        resposta = self.login(client)
+        self.assertEqual(resposta.status_code, 200)
+        nova = client.cookies[settings.SESSION_COOKIE_NAME].value
+        self.assertNotEqual(nova, chave_antiga)
+        self.assertFalse(engine.SessionStore(session_key=chave_antiga).exists(chave_antiga))
+        self.assertNotEqual(client.cookies["csrftoken"].value, csrf_antes)
+        # a chave antiga (fixada por um atacante, por exemplo) nao da acesso
+        intruso = APIClient()
+        intruso.cookies[settings.SESSION_COOKIE_NAME] = chave_antiga
+        self.assertEqual(intruso.get("/api/v1/auth/me/").status_code, 403)
+
+    def test_logout_invalida_a_sessao_antiga(self):
+        client = APIClient(enforce_csrf_checks=True)
+        self.login(client)
+        sessao = client.cookies[settings.SESSION_COOKIE_NAME].value
+        token = client.get("/api/v1/auth/csrf/").json()["csrfToken"]
+        self.assertEqual(client.post("/api/v1/auth/logout/", HTTP_X_CSRFTOKEN=token).status_code, 204)
+        reaproveitada = APIClient()
+        reaproveitada.cookies[settings.SESSION_COOKIE_NAME] = sessao
+        self.assertEqual(reaproveitada.get("/api/v1/auth/me/").status_code, 403)
+        self.assertEqual(reaproveitada.get("/api/v1/painel/servicos/").status_code, 403)

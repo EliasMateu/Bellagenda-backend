@@ -9,6 +9,7 @@ import time
 
 from django.conf import settings
 from django.core.cache import cache
+from rest_framework.exceptions import Throttled
 from rest_framework.throttling import BaseThrottle
 
 from apps.clientes.telefone import normalizar_telefone_br
@@ -78,16 +79,46 @@ class LimiteConsultaPorIPeSlug(LimiteJanelaFixa):
         return f"{ip_do_cliente(request)}|{str(view.kwargs.get('slug', '')).lower()}"
 
 
-class LimiteLoginPorIP(LimiteJanelaFixa):
-    escopo = "login_ip"
+class LimiteFalhasLogin:
+    """Conta SOMENTE falhas de autenticacao (sucesso nao conta), em tres chaves.
 
-    def identificador(self, request, view):
-        return ip_do_cliente(request)
+    - login_usuario_ip: username + IP (estrita): quem erra a propria senha e bloqueado so ali;
+    - login_usuario: username em qualquer IP (mais frouxa): freia ataque distribuido;
+    - login_ip: IP isolado (frouxa): freia varredura de varios usernames.
+    Terceiros que erram a senha de alguem de OUTRO IP nao esgotam a chave estrita da vitima.
+    """
 
+    ESCOPOS = ("login_usuario_ip", "login_usuario", "login_ip")
 
-class LimiteLoginPorUsuario(LimiteJanelaFixa):
-    escopo = "login_usuario"
+    def __init__(self, request, username):
+        usuario = str(username).strip().lower()
+        ip = ip_do_cliente(request)
+        self.agora = time.time()
+        self.identificadores = {
+            "login_usuario_ip": f"{usuario}|{ip}",
+            "login_usuario": usuario,
+            "login_ip": ip,
+        }
 
-    def identificador(self, request, view):
-        usuario = request.data.get("username") if hasattr(request.data, "get") else None
-        return str(usuario).strip().lower() if usuario else None
+    def _chave(self, escopo):
+        _, janela = settings.LIMITES_PUBLICOS[escopo]
+        balde = int(self.agora // janela)
+        bruto = f"{escopo}:{self.identificadores[escopo]}"
+        return f"thr:{hashlib.sha256(bruto.encode()).hexdigest()}:{balde}"
+
+    def verificar(self):
+        """429 se alguma chave ja atingiu o maximo de falhas na janela."""
+        for escopo in self.ESCOPOS:
+            maximo, janela = settings.LIMITES_PUBLICOS[escopo]
+            if (cache.get(self._chave(escopo)) or 0) >= maximo:
+                raise Throttled(wait=janela - (self.agora % janela))
+
+    def registrar_falha(self):
+        for escopo in self.ESCOPOS:
+            _, janela = settings.LIMITES_PUBLICOS[escopo]
+            chave = self._chave(escopo)
+            cache.set(chave, (cache.get(chave) or 0) + 1, timeout=janela)
+
+    def limpar(self):
+        """Login com sucesso zera a chave estrita (as frouxas seguem contando o que ja houve)."""
+        cache.delete(self._chave("login_usuario_ip"))

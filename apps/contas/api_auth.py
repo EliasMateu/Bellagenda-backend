@@ -9,7 +9,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.core.exceptions import ErroApi
-from apps.core.throttles import LimiteLoginPorIP, LimiteLoginPorUsuario
+from apps.core.throttles import LimiteFalhasLogin
 
 
 class CredenciaisInvalidas(ErroApi):
@@ -51,20 +51,25 @@ class LoginView(APIView):
     # Sem autenticacao de sessao para nao exigir login previo; o CSRF e verificado a mao abaixo.
     authentication_classes = []
     permission_classes = [AllowAny]
-    throttle_classes = [LimiteLoginPorIP, LimiteLoginPorUsuario]
 
     def post(self, request):
+        # Ordem importa: CSRF e corpo sao validados ANTES de qualquer contagem, para que requisicoes
+        # invalidas de terceiros nao gastem o limite da vitima. So falhas de autenticacao contam.
         SessionAuthentication().enforce_csrf(request)
         entrada = LoginSerializer(data=request.data)
         entrada.is_valid(raise_exception=True)
+        limite = LimiteFalhasLogin(request, entrada.validated_data["username"])
+        limite.verificar()
         user = authenticate(
             request._request,
             username=entrada.validated_data["username"],
             password=entrada.validated_data["password"],
         )
         if user is None or not user.is_active:
+            limite.registrar_falha()
             raise CredenciaisInvalidas()
-        login(request._request, user)
+        limite.limpar()
+        login(request._request, user)  # gira a chave de sessao e o token CSRF
         return Response(dados_do_usuario(user))
 
 
