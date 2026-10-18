@@ -4,7 +4,7 @@ from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import serializers, status
 from rest_framework.authentication import SessionAuthentication
@@ -104,10 +104,17 @@ class ConfiguracaoView(APIView):
     permission_classes = [ProfissionalAtiva]
 
     def _configuracao(self, request):
-        configuracao, _ = Configuracao.objects.get_or_create(
-            profissional=request.user.profissional
-        )
-        return configuracao
+        """Singleton do tenant; tolera dois primeiros acessos simultaneos (IntegrityError -> rele)."""
+        profissional = request.user.profissional
+        try:
+            return Configuracao.objects.get(profissional=profissional)
+        except Configuracao.DoesNotExist:
+            pass
+        try:
+            with transaction.atomic():
+                return Configuracao.objects.create(profissional=profissional)
+        except IntegrityError:
+            return Configuracao.objects.get(profissional=profissional)
 
     def get(self, request):
         serializer = ConfiguracaoSerializer(
@@ -215,7 +222,7 @@ class AgendamentoCriarSerializer(TenantSerializer):
         profissional = validated_data["profissional"]
         servico = validated_data["servico"]
         # Serializa criacoes concorrentes da mesma profissional (evita deadlock da exclusao).
-        Profissional.objects.select_for_update().get(pk=profissional.pk)
+        Profissional.objects.select_for_update(no_key=True).get(pk=profissional.pk)
         cliente = validated_data.get("cliente")
         if cliente is None:
             cliente, _ = Cliente.objects.get_or_create(
@@ -368,7 +375,7 @@ class AgendamentoViewSet(TenantModelViewSet):
         entrada.is_valid(raise_exception=True)
         novo_inicio = entrada.validated_data["inicio"]
         with transaction.atomic():
-            Profissional.objects.select_for_update().get(pk=agendamento.profissional_id)
+            Profissional.objects.select_for_update(no_key=True).get(pk=agendamento.profissional_id)
             travado = Agendamento.objects.select_for_update().select_related("servico").get(
                 pk=agendamento.pk
             )

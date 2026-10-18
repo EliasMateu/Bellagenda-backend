@@ -29,7 +29,7 @@ from .horarios import (
     horarios_livres,
     proximos_horarios,
 )
-from .models import Agendamento
+from .models import Agendamento, TransicaoAgendamentoInvalida
 from .tokens import gerar_token_e_hash, hash_token
 
 MAX_AGENDAMENTOS_FUTUROS_POR_TELEFONE = 2
@@ -194,7 +194,7 @@ class CriarAgendamentoView(PublicoView):
         try:
             with transaction.atomic():
                 # Serializa as criacoes da mesma profissional (limite por telefone sem corrida).
-                Profissional.objects.select_for_update().get(pk=profissional.pk)
+                Profissional.objects.select_for_update(no_key=True).get(pk=profissional.pk)
                 cliente, _ = Cliente.objects.get_or_create(
                     profissional=profissional,
                     telefone=dados["telefone"],
@@ -343,6 +343,8 @@ class CancelarAgendamentoView(PublicoView):
                 raise NaoCancelavel()
             if agora >= _limite_cancelamento(agendamento, config):
                 raise ForaDoPrazo()
-            agendamento.status = Agendamento.Status.CANCELADO_CLIENTE
-            agendamento.save()
+            try:
+                agendamento.aplicar_status(Agendamento.Status.CANCELADO_CLIENTE)
+            except TransicaoAgendamentoInvalida:
+                raise NaoCancelavel()
         return Response({"codigo": agendamento.codigo_curto, "status": agendamento.status})

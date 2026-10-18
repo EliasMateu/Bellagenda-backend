@@ -2,7 +2,7 @@
 
 from django.core.exceptions import PermissionDenied as DjangoPermissionDenied
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db import IntegrityError
+from django.db import IntegrityError, OperationalError
 from django.db.models import ProtectedError, RestrictedError
 from django.http import Http404
 from rest_framework import exceptions, status
@@ -42,7 +42,18 @@ RESTRICOES = {
         400, "duplicado", "Ja existe um horario neste dia com este inicio.", "inicio"),
     "agendamento_sem_sobreposicao": (
         409, "conflito_horario", "Este horario ja esta ocupado.", None),
+    # Colisoes aleatorias (codigo curto) ou token repetido: controladas, o cliente pode tentar de novo.
+    "agendamento_codigo_unico_por_profissional": (
+        409, "tente_novamente", "Nao foi possivel concluir agora. Tente novamente.", None),
 }
+# Constraints com nome gerado pelo Django (unique=True em campo), casadas por prefixo.
+PREFIXOS_RESTRICOES = {
+    "agenda_agendamento_token_hash": (
+        409, "tente_novamente", "Nao foi possivel concluir agora. Tente novamente.", None),
+}
+
+# SQLSTATE de conflito de concorrencia: deadlock_detected e serialization_failure.
+SQLSTATES_CONCORRENCIA = {"40P01", "40001"}
 
 
 def _textos(valor):
@@ -72,16 +83,29 @@ def _resposta_banco(exc):
         )
     if isinstance(exc, IntegrityError):
         diag = getattr(exc.__cause__, "diag", None)
-        regra = RESTRICOES.get(getattr(diag, "constraint_name", None))
+        nome = getattr(diag, "constraint_name", None) or ""
+        regra = RESTRICOES.get(nome) or next(
+            (r for prefixo, r in PREFIXOS_RESTRICOES.items() if nome.startswith(prefixo)), None
+        )
         if regra is not None:
             http, code, message, campo = regra
             fields = {campo: [message]} if campo else {}
             return Response({"code": code, "message": message, "fields": fields}, status=http)
+    if isinstance(exc, OperationalError):
+        if getattr(exc.__cause__, "sqlstate", None) in SQLSTATES_CONCORRENCIA:
+            return Response(
+                {
+                    "code": "conflito_concorrente",
+                    "message": "Outra operacao estava em andamento ao mesmo tempo. Tente novamente.",
+                    "fields": {},
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
     return None
 
 
 def tratar_excecao(exc, context):
-    if isinstance(exc, (IntegrityError, ProtectedError, RestrictedError)):
+    if isinstance(exc, (IntegrityError, OperationalError, ProtectedError, RestrictedError)):
         return _resposta_banco(exc)  # None => segue como erro 500
 
     if isinstance(exc, DjangoValidationError):  # validacao de modelo (clean/save) => 400

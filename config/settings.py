@@ -167,8 +167,10 @@ LIMITES_PUBLICOS = {
     "telefone": (5, 3600),        # criacoes de agendamento por telefone
     "tenant": (30, 3600),         # POSTs publicos por profissional (slug)
     "consulta": (5, 3600),        # consultar/cancelar por IP + slug
-    "login_ip": (10, 3600),       # tentativas de login por IP
-    "login_usuario": (10, 3600),  # tentativas de login por username
+    # Login: contam apenas FALHAS de autenticacao.
+    "login_usuario_ip": (5, 3600),  # estrita: username + IP
+    "login_usuario": (50, 3600),    # frouxa: username em qualquer IP
+    "login_ip": (30, 3600),         # frouxa: IP isolado
 }
 
 # IP do cliente: por ora REMOTE_ADDR. Quando o proxy da Vercel/Caddy estiver na frente, o IP real

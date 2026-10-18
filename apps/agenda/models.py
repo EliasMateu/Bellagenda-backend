@@ -121,10 +121,11 @@ class Agendamento(TenantModel):
         ONLINE = "online", "Online"
         BALCAO = "balcao", "Balcao"
 
-    # Pendente -> confirmado | cancelado_salao; confirmado -> concluido | falta | cancelado_*.
+    # Fonte unica da matriz de transicoes (painel e API publica usam aplicar_status):
+    # pendente -> confirmado | cancelado_*; confirmado -> concluido | falta | cancelado_*.
     # Estados finais nao mudam.
     TRANSICOES = {
-        Status.PENDENTE: {Status.CONFIRMADO, Status.CANCELADO_SALAO},
+        Status.PENDENTE: {Status.CONFIRMADO, Status.CANCELADO_SALAO, Status.CANCELADO_CLIENTE},
         Status.CONFIRMADO: {
             Status.CONCLUIDO, Status.FALTA, Status.CANCELADO_SALAO, Status.CANCELADO_CLIENTE,
         },
@@ -208,14 +209,35 @@ class Agendamento(TenantModel):
             raise ValidationError(erros)
 
     def save(self, *args, **kwargs):
-        """Valida tenant e datas, calcula fim_ocupado e gera o codigo curto se ausente."""
+        """Valida tenant e datas; calcula fim_ocupado so ao criar ou ao mudar inicio/fim.
+
+        Mudancas que nao mexem no horario (status, observacao) preservam o fim_ocupado ja gravado,
+        mesmo que o intervalo da Configuracao tenha mudado depois.
+        """
         self.clean()
-        self.fim_ocupado = self.fim + timedelta(minutes=self._intervalo_min())
+        recalcular = self._state.adding
+        if not recalcular:
+            atual = (
+                Agendamento.objects.filter(pk=self.pk)
+                .values("inicio", "fim", "fim_ocupado")
+                .first()
+            )
+            if atual is None or (atual["inicio"], atual["fim"]) != (self.inicio, self.fim):
+                recalcular = True
+            else:
+                self.fim_ocupado = atual["fim_ocupado"]
+        if recalcular:
+            self.fim_ocupado = self.fim + timedelta(minutes=self._intervalo_min())
         if self._state.adding and not self.codigo_curto:
             self.codigo_curto = self._novo_codigo_curto()
         update_fields = kwargs.get("update_fields")
         if update_fields is not None:
-            kwargs["update_fields"] = {*update_fields, "fim_ocupado", "codigo_curto"}
+            extras = set()
+            if recalcular:
+                extras.add("fim_ocupado")
+            if self._state.adding:
+                extras.add("codigo_curto")
+            kwargs["update_fields"] = {*update_fields, *extras}
         super().save(*args, **kwargs)
 
     def aplicar_status(self, novo_status):

@@ -95,3 +95,16 @@ python manage.py alterar_slug --slug-atual maria-lima --novo-slug maria-nails --
 Em producao: rode `python manage.py collectstatic` (os estaticos do admin precisam ser servidos pelo Caddy/WhiteNoise
 a partir de `STATIC_ROOT`). Pendente: protecao contra forca bruta no login do admin (o limite de login existe so na API)
 e o link de redefinicao de senha.
+
+## Notas para o frontend
+
+- **Login gira o CSRF e a sessao.** Depois de `POST /api/v1/auth/login/` o token CSRF antigo deixa de valer e a chave
+  de sessao muda: chame `GET /api/v1/auth/csrf/` de novo e use o novo `csrfToken` no `X-CSRFToken` das proximas
+  requisicoes (o mesmo vale apos o logout).
+- **Limite de login:** conta so falhas de autenticacao (5/h por username+IP, 50/h por username em qualquer IP, 30/h por IP);
+  CSRF ausente ou corpo invalido nao contam e login correto zera a chave username+IP. Resposta 429 `limite_requisicoes`.
+- **Balcao (`POST /painel/agendamentos/`):** se o telefone ja existe, o cliente existente e reaproveitado e
+  `cliente_nome` e ignorado (o nome cadastrado nao e sobrescrito).
+- **Conflitos de concorrencia:** deadlock/serialization failure do PostgreSQL voltam como 409 `conflito_concorrente`
+  (repetir a operacao); colisoes raras de codigo curto/token voltam como 409 `tente_novamente`.
+- `fim_ocupado` so e recalculado ao criar ou remarcar; mudar o intervalo da configuracao nao altera agendamentos existentes.
