@@ -362,6 +362,59 @@ class ConsultaCancelamentoTests(PublicoMixin, TestCase):
         self.assertNotIn(TEL_E164, texto)
         self.assertIn("5432", texto)
 
+    def test_profissional_telefone_e164_normalizado(self):
+        self.p.telefone = "(15) 99766-9299"
+        self.p.save()
+        dados = self.consultar({"token": self.token}).json()
+        self.assertEqual(dados["profissional_telefone"], "+5515997669299")
+        self.assertEqual(dados["profissional"], self.p.nome_exibicao)
+        self.assertEqual(dados["cliente"]["telefone"], "(**) *****-5432")  # cliente segue mascarada
+
+    def test_profissional_telefone_vazio_ou_invalido_e_null(self):
+        for valor in ("", "123"):
+            with self.subTest(valor=valor):
+                self.p.telefone = valor
+                self.p.save()
+                self.assertIsNone(self.consultar({"token": self.token}).json()["profissional_telefone"])
+
+    def test_telefone_da_profissional_so_na_consulta(self):
+        self.p.telefone = "+5515997669299"
+        self.p.save()
+        for resposta in (
+            self.client.get(self.url("servicos/")),
+            self.client.get(self.url("horarios/") + f"?servico={self.servico.pk}&data={dia_futuro()}"),
+            self.agendar(self.horarios()[1], telefone=TEL_2),
+        ):
+            self.assertNotIn("5515997669299", resposta.content.decode())
+            self.assertNotIn("profissional_telefone", resposta.content.decode())
+
+    def test_telefone_da_profissional_nao_vaza_nas_falhas(self):
+        self.p.telefone = "+5515997669299"
+        self.p.save()
+        outra = criar_profissional("outra-manicure")
+        criar_servico(outra)
+        for corpo, slug in (
+            ({"token": "errado"}, "calita"),
+            ({"token": self.token}, "outra-manicure"),
+            ({"codigo": self.codigo, "telefone": TEL_2}, "calita"),
+        ):
+            resposta = self.consultar(corpo, slug)
+            self.assertEqual(resposta.status_code, 404)
+            self.assertNotIn("5515997669299", resposta.content.decode())
+            self.assertNotIn("profissional_telefone", resposta.content.decode())
+
+    def test_profissional_suspensa_ou_pendente_continua_404(self):
+        self.p.telefone = "+5515997669299"
+        self.p.save()
+        self.p.mudar_status("suspensa", admin_plataforma())
+        resposta = self.consultar({"token": self.token})
+        self.assertEqual(resposta.status_code, 404)
+        self.assertNotIn("5515997669299", resposta.content.decode())
+        em_analise = criar_profissional("em-analise", ativa=False)
+        em_analise.telefone = "+5515997669299"
+        em_analise.save()
+        self.assertEqual(self.consultar({"token": self.token}, "em-analise").status_code, 404)
+
     def test_falhas_sao_404_identicos(self):
         outra = criar_profissional("outra-manicure")
         criar_servico(outra)
