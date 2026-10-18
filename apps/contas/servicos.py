@@ -30,3 +30,16 @@ def mudar_status_auditado(pk, novo_status, por, motivo="", so_de=None):
             change_message=mensagem, single_object=True,
         )
     return profissional, antes
+
+
+def criar_horarios_padrao(profissional):
+    """Horarios seg-sex 09:00-18:00 e Configuracao com os padroes (DOC-03). Chamar dentro de transacao."""
+    from datetime import time
+
+    from apps.agenda.models import Configuracao, HorarioTrabalho
+
+    for dia in range(5):  # segunda a sexta
+        HorarioTrabalho.objects.create(
+            profissional=profissional, dia_semana=dia, inicio=time(9), fim=time(18)
+        )
+    Configuracao.objects.get_or_create(profissional=profissional)

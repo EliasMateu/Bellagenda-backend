@@ -1,7 +1,6 @@
 import getpass
 import os
 import sys
-from datetime import time
 
 from django.contrib.auth import get_user_model
 from django.contrib.auth.password_validation import validate_password
@@ -9,9 +8,9 @@ from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from apps.agenda.models import Configuracao, HorarioTrabalho
 from apps.clientes.telefone import normalizar_telefone_br
 from apps.contas.models import Profissional
+from apps.contas.servicos import criar_horarios_padrao
 from apps.contas.validators import validar_slug
 
 SENHA_ENV = "DJANGO_PROFISSIONAL_PASSWORD"
@@ -98,11 +97,7 @@ class Command(BaseCommand):
             if aprovador is not None:
                 profissional.mudar_status("ativa", aprovador, "Criada pelo comando criar_profissional")
             if opts["horarios_padrao"]:
-                for dia in range(5):  # segunda a sexta
-                    HorarioTrabalho.objects.create(
-                        profissional=profissional, dia_semana=dia, inicio=time(9), fim=time(18)
-                    )
-                Configuracao.objects.get_or_create(profissional=profissional)
+                criar_horarios_padrao(profissional)
 
         self.stdout.write(
             self.style.SUCCESS(

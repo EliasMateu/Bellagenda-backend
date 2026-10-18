@@ -21,6 +21,7 @@ from apps.core.exceptions import ErroApi
 from apps.core.throttles import LimiteCadastroPorIP, LimiteChecagemSlugPorIP
 
 from .models import Profissional
+from .servicos import criar_horarios_padrao
 from .validators import validar_slug
 
 User = get_user_model()
@@ -182,7 +183,7 @@ class CadastroView(APIView):
                 user = User(username=dados["username"], is_staff=False, is_superuser=False)
                 user.set_password(dados["password"])
                 user.save()
-                Profissional.objects.create(
+                profissional = Profissional.objects.create(
                     user=user,
                     nome_exibicao=dados["nome_exibicao"],
                     telefone=dados["telefone"],
@@ -190,6 +191,7 @@ class CadastroView(APIView):
                     termos_versao=dados["termos_versao"],
                     termos_aceitos_em=timezone.now(),
                 )
+                criar_horarios_padrao(profissional)
         except IntegrityError as erro:
             # Corrida: outro cadastro levou o usuario ou o slug entre a validacao e o INSERT.
             nome = getattr(getattr(erro.__cause__, "diag", None), "constraint_name", None) or ""

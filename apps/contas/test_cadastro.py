@@ -85,6 +85,31 @@ class CadastroFelizTests(CadastroBase):
         self.assertNotIn("sessionid", resposta.cookies)  # sem login automatico
         self.assertEqual(APIClient().get("/api/v1/auth/me/").status_code, 403)
 
+    def test_conta_nova_ganha_horarios_padrao_e_configuracao_sem_servicos(self):
+        from datetime import time
+
+        from apps.agenda.models import Configuracao, HorarioTrabalho
+        from apps.servicos.models import Servico
+
+        self.assertEqual(self.post().status_code, 201)
+        p = Profissional.objects.get()
+        faixas = HorarioTrabalho.objects.filter(profissional=p).order_by("dia_semana")
+        self.assertEqual([f.dia_semana for f in faixas], [0, 1, 2, 3, 4])
+        self.assertTrue(all(f.inicio == time(9) and f.fim == time(18) for f in faixas))
+        self.assertTrue(Configuracao.objects.filter(profissional=p).exists())
+        self.assertFalse(Servico.objects.filter(profissional=p).exists())
+
+    def test_falha_ao_criar_horarios_desfaz_tudo(self):
+        from apps.agenda.models import Configuracao, HorarioTrabalho
+
+        with mock.patch("apps.contas.api_cadastro.criar_horarios_padrao", side_effect=RuntimeError("boom")):
+            with self.assertRaises(RuntimeError):
+                self.post()
+        self.assertFalse(User.objects.filter(username="maria.silva").exists())
+        self.assertEqual(self.contas(), 0)
+        self.assertEqual(HorarioTrabalho.objects.count(), 0)
+        self.assertEqual(Configuracao.objects.count(), 0)
+
     def test_username_e_slug_sao_normalizados_para_minusculas(self):
         resposta = self.post(username="Maria.Silva", slug="Maria-Silva")
         self.assertEqual(resposta.status_code, 201, resposta.content)
