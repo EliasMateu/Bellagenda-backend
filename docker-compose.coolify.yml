@@ -1,0 +1,164 @@
+# PRODUCAO em VPS que JA TEM Coolify/Traefik (proxy dono das portas 80/443). Sem Caddy e sem "ports".
+# Use SEMPRE com o projeto e o arquivo de variaveis:
+#   docker compose -p bellagenda --env-file .env.production -f docker-compose.coolify.yml <comando>
+# O Traefik do Coolify (entrypoints http/https, resolver letsencrypt, rede externa "coolify") alcanca o web e o
+# estaticos pelas etiquetas abaixo. Nada aqui altera o Coolify nem projetos de terceiros.
+# Nas etiquetas, ${SITE_ADDRESS} e interpolado pelo compose; crases (Host(`...`)) sao literais e um cifrao
+# literal precisaria ser escrito $$ (nao ha nenhum).
+name: bellagenda
+
+x-logs: &logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # Superusuario do container: usado so pelo init e pelo healthcheck, nunca pela aplicacao.
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:?defina POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?defina POSTGRES_SUPERUSER_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:?defina POSTGRES_DB}
+      DB_OWNER_USER: ${POSTGRES_OWNER_USER:?defina POSTGRES_OWNER_USER}
+      DB_OWNER_PASSWORD: ${POSTGRES_OWNER_PASSWORD:?defina POSTGRES_OWNER_PASSWORD}
+      DB_APP_USER: ${POSTGRES_APP_USER:?defina POSTGRES_APP_USER}
+      DB_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?defina POSTGRES_APP_PASSWORD}
+    # SEM "ports" e SEM a rede coolify: o banco so existe na rede interna deste projeto.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init-prod:/docker-entrypoint-initdb.d:ro
+    networks: [interna]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1536m
+    logging: *logs
+
+  web:
+    build: .
+    image: bellagenda-web:prod
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Apenas o papel de APLICACAO (sem DDL). Credenciais do dono so no servico "migrar".
+    environment: &web_env
+      DJANGO_DEBUG: "False"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?defina DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?defina DJANGO_ALLOWED_HOSTS}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+      DJANGO_SESSION_COOKIE_SECURE: ${DJANGO_SESSION_COOKIE_SECURE:-True}
+      DJANGO_CSRF_COOKIE_SECURE: ${DJANGO_CSRF_COOKIE_SECURE:-True}
+      DJANGO_ADMIN_PATH: ${DJANGO_ADMIN_PATH:?defina DJANGO_ADMIN_PATH}
+      DJANGO_CADASTRO_ABERTO: ${DJANGO_CADASTRO_ABERTO:-False}
+      DJANGO_CADASTRO_MAX_PENDENTES: ${DJANGO_CADASTRO_MAX_PENDENTES:-50}
+      DJANGO_TERMOS_VERSAO: ${DJANGO_TERMOS_VERSAO:-2026-10-provisorio}
+      DJANGO_PROXY_SECRET: ${DJANGO_PROXY_SECRET:?defina DJANGO_PROXY_SECRET}
+      DJANGO_SSL_REDIRECT: ${DJANGO_SSL_REDIRECT:-False}
+      DJANGO_DB_ROLE: app
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+    volumes:
+      - static_files:/app/staticfiles
+    # interna: fala com o db. coolify: o Traefik alcanca o web por aqui.
+    networks: [interna, coolify]
+    # O healthcheck vem do Dockerfile (GET /api/v1/saude/).
+    mem_limit: 1g
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *logs
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      # HTTPS: tudo que nao for /static/admin vai para o Gunicorn (prioridade menor que a dos estaticos).
+      - "traefik.http.routers.bellagenda-web.rule=Host(`${SITE_ADDRESS:?defina SITE_ADDRESS}`)"
+      - "traefik.http.routers.bellagenda-web.entrypoints=https"
+      - "traefik.http.routers.bellagenda-web.priority=10"
+      - "traefik.http.routers.bellagenda-web.tls=true"
+      - "traefik.http.routers.bellagenda-web.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.bellagenda-web.middlewares=bellagenda-seguranca,bellagenda-compressao"
+      - "traefik.http.routers.bellagenda-web.service=bellagenda-web"
+      - "traefik.http.services.bellagenda-web.loadbalancer.server.port=8000"
+      # HTTP: so redireciona para HTTPS (o desafio ACME do Traefik nao passa por aqui).
+      - "traefik.http.routers.bellagenda-web-http.rule=Host(`${SITE_ADDRESS}`)"
+      - "traefik.http.routers.bellagenda-web-http.entrypoints=http"
+      - "traefik.http.routers.bellagenda-web-http.middlewares=bellagenda-https"
+      - "traefik.http.routers.bellagenda-web-http.service=noop@internal"
+      # Middlewares (nomes unicos com prefixo bellagenda-; nada global).
+      - "traefik.http.middlewares.bellagenda-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.bellagenda-https.redirectscheme.permanent=true"
+      - "traefik.http.middlewares.bellagenda-seguranca.headers.stsSeconds=31536000"
+      - "traefik.http.middlewares.bellagenda-seguranca.headers.stsIncludeSubdomains=true"
+      - "traefik.http.middlewares.bellagenda-seguranca.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.bellagenda-seguranca.headers.referrerPolicy=strict-origin-when-cross-origin"
+      - "traefik.http.middlewares.bellagenda-seguranca.headers.frameDeny=true"
+      - "traefik.http.middlewares.bellagenda-compressao.compress=true"
+
+  # Serve SOMENTE /static/admin/ (tela do backoffice), somente leitura, a partir do volume do collectstatic.
+  estaticos:
+    image: nginx:alpine
+    restart: unless-stopped
+    volumes:
+      - ./docker/nginx/estaticos.conf:/etc/nginx/conf.d/default.conf:ro
+      - static_files:/srv/static:ro
+    networks: [coolify]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/healthz || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    mem_limit: 64m
+    security_opt: ["no-new-privileges:true"]
+    logging: *logs
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=coolify"
+      - "traefik.http.routers.bellagenda-estaticos.rule=Host(`${SITE_ADDRESS}`) && PathPrefix(`/static/admin`)"
+      - "traefik.http.routers.bellagenda-estaticos.entrypoints=https"
+      - "traefik.http.routers.bellagenda-estaticos.priority=100"
+      - "traefik.http.routers.bellagenda-estaticos.tls=true"
+      - "traefik.http.routers.bellagenda-estaticos.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.bellagenda-estaticos.middlewares=bellagenda-seguranca,bellagenda-compressao"
+      - "traefik.http.routers.bellagenda-estaticos.service=bellagenda-estaticos"
+      - "traefik.http.services.bellagenda-estaticos.loadbalancer.server.port=80"
+
+  # Tarefas pontuais com o papel DONO (migrate, createcachetable). Nao sobe com "up":
+  #   dc run --rm migrar
+  migrar:
+    image: bellagenda-web:prod
+    profiles: ["ops"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *web_env
+      DJANGO_DB_ROLE: owner
+      POSTGRES_USER: ${POSTGRES_OWNER_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    networks: [interna]
+    mem_limit: 512m
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *logs
+
+networks:
+  # "internal": sem acesso a internet nem as portas do host; o db so conversa aqui.
+  interna:
+    internal: true
+  # Rede do Traefik do Coolify: ja existe, so e referenciada (nunca criada nem removida por este projeto).
+  coolify:
+    external: true
+    name: coolify
+
+volumes:
+  pgdata:
+  static_files:
