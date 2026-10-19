@@ -20,6 +20,7 @@ Dockerfile
 Caddyfile
 docker/postgres
 docker/caddy
+docker/nginx
 **/test*.py
 .idea
 .vscode
