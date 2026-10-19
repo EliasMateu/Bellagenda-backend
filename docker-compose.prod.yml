@@ -1,0 +1,126 @@
+# PRODUCAO (VPS). Use SEMPRE com o arquivo de variaveis:
+#   docker compose --env-file .env.production -f docker-compose.prod.yml <comando>
+# Somente o Caddy publica portas (80/443). O PostgreSQL e o Gunicorn ficam na rede interna.
+name: bellagenda
+
+x-logs: &logs
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    # Superusuario do container: usado so pelo init e pelo healthcheck, nunca pela aplicacao.
+    environment:
+      POSTGRES_USER: ${POSTGRES_SUPERUSER:?defina POSTGRES_SUPERUSER}
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?defina POSTGRES_SUPERUSER_PASSWORD}
+      DB_NAME: ${POSTGRES_DB:?defina POSTGRES_DB}
+      DB_OWNER_USER: ${POSTGRES_OWNER_USER:?defina POSTGRES_OWNER_USER}
+      DB_OWNER_PASSWORD: ${POSTGRES_OWNER_PASSWORD:?defina POSTGRES_OWNER_PASSWORD}
+      DB_APP_USER: ${POSTGRES_APP_USER:?defina POSTGRES_APP_USER}
+      DB_APP_PASSWORD: ${POSTGRES_APP_PASSWORD:?defina POSTGRES_APP_PASSWORD}
+    # SEM "ports": o banco nao e acessivel de fora da rede interna.
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/init-prod:/docker-entrypoint-initdb.d:ro
+    networks: [interna]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    mem_limit: 1536m
+    logging: *logs
+
+  web:
+    build: .
+    image: bellagenda-web:prod
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    # Apenas o papel de APLICACAO (sem DDL). Credenciais do dono so no servico "migrar".
+    environment: &web_env
+      DJANGO_DEBUG: "False"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?defina DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?defina DJANGO_ALLOWED_HOSTS}
+      DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:-}
+      DJANGO_SESSION_COOKIE_SECURE: ${DJANGO_SESSION_COOKIE_SECURE:-True}
+      DJANGO_CSRF_COOKIE_SECURE: ${DJANGO_CSRF_COOKIE_SECURE:-True}
+      DJANGO_ADMIN_PATH: ${DJANGO_ADMIN_PATH:?defina DJANGO_ADMIN_PATH}
+      DJANGO_CADASTRO_ABERTO: ${DJANGO_CADASTRO_ABERTO:-False}
+      DJANGO_CADASTRO_MAX_PENDENTES: ${DJANGO_CADASTRO_MAX_PENDENTES:-50}
+      DJANGO_TERMOS_VERSAO: ${DJANGO_TERMOS_VERSAO:-2026-10-provisorio}
+      DJANGO_PROXY_SECRET: ${DJANGO_PROXY_SECRET:?defina DJANGO_PROXY_SECRET}
+      DJANGO_SSL_REDIRECT: ${DJANGO_SSL_REDIRECT:-False}
+      DJANGO_DB_ROLE: app
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_HOST: db
+      POSTGRES_PORT: "5432"
+      POSTGRES_APP_USER: ${POSTGRES_APP_USER}
+      POSTGRES_APP_PASSWORD: ${POSTGRES_APP_PASSWORD}
+    volumes:
+      - static_files:/app/staticfiles
+    networks: [interna]
+    # O healthcheck vem do Dockerfile (GET /api/v1/saude/).
+    mem_limit: 1g
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *logs
+
+  # Tarefas pontuais com o papel DONO (migrate, createcachetable). Nao sobe com "up":
+  #   docker compose --env-file .env.production -f docker-compose.prod.yml run --rm migrar
+  migrar:
+    image: bellagenda-web:prod
+    profiles: ["ops"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *web_env
+      DJANGO_DB_ROLE: owner
+      POSTGRES_USER: ${POSTGRES_OWNER_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_OWNER_PASSWORD}
+    command: ["python", "manage.py", "migrate", "--noinput"]
+    networks: [interna]
+    mem_limit: 512m
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: [ALL]
+    logging: *logs
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      web:
+        condition: service_healthy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-srv2037119.hstgr.cloud}
+    # UNICO servico que publica portas.
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - static_files:/srv/static:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks: [interna, publica]
+    mem_limit: 256m
+    security_opt: ["no-new-privileges:true"]
+    logging: *logs
+
+networks:
+  # "internal": sem acesso a internet nem a portas do host; db e web so conversam aqui.
+  interna:
+    internal: true
+  publica:
+
+volumes:
+  pgdata:
+  static_files:
+  caddy_data:
+  caddy_config:

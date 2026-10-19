@@ -1,0 +1,33 @@
+# Caddy: unico servico exposto (80/443). HTTPS automatico (Let's Encrypt) para o site abaixo.
+# SITE_ADDRESS vem do ambiente (padrao: hostname da VPS, sem dominio proprio).
+{$SITE_ADDRESS:srv2037119.hstgr.cloud} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	# Estaticos: apenas os do admin do Django (tela do backoffice). Nada alem disso e servido.
+	handle /static/admin/* {
+		root * /srv/static
+		header Cache-Control "public, max-age=86400"
+		file_server
+	}
+	handle /static/* {
+		respond "Nao encontrado" 404
+	}
+
+	# Todo o resto vai para o Django/Gunicorn (rede interna). O Caddy envia X-Forwarded-Proto/For.
+	handle {
+		reverse_proxy web:8000
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}
