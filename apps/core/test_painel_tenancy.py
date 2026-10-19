@@ -67,6 +67,8 @@ class Ten01PainelTests(TestCase):
         self.assertEqual(registradas, set(MODELOS))
         nomes_extras = {p.name for p in urlpatterns} - {n for n, *_ in rotas_do_router()}
         self.assertEqual(nomes_extras, {"painel-configuracao"})  # singleton, testado abaixo
+        # Acao de lista de clientes (importacao de contatos): isolamento testado em clientes/test_importacao.py
+        self.assertIn("painel-cliente-importar", {n for n, *_ in rotas_do_router()})
 
     def test_toda_rota_tem_viewset_do_tenant(self):
         from .tenancy import TenantModelViewSet

@@ -85,6 +85,16 @@ de testes proprio: `DJANGO_DB_ROLE=owner POSTGRES_TEST_DB=test_forja python mana
   Conta pendente loga e ve `/auth/me`, mas o painel responde 403.
 - `/api/v1/painel/`: `servicos`, `clientes` (`?busca=`), `horarios-trabalho`, `bloqueios`, `configuracao`,
   `agendamentos` (`?de=&ate=&status=`; acoes POST `confirmar`, `recusar`, `cancelar`, `concluir`, `faltou`, `remarcar`).
+- `POST /api/v1/painel/clientes/importar/` (importacao de contatos do celular; o navegador faz o parsing de .vcf/.csv ou usa
+  o seletor de contatos e envia so a lista escolhida). Corpo: `{contatos: [{nome, telefone}], simular}` (max. 300 contatos;
+  `simular` booleano, padrao `true`: a previa NUNCA grava; `false` confirma e cria so os novos, em uma transacao).
+  Resposta 200: `{simulacao, resumo: {total, novos, duplicados, invalidos}, itens: [{indice (0-based), status: novo|duplicado|invalido,
+  telefone (E.164 ou null), nome (normalizado), motivo, cliente_existente}], criados}`. Motivos: `ja_cadastrado` (traz
+  `cliente_existente`), `repetido_na_lista`, `telefone_invalido`, `nome_invalido`. Nome vazio com telefone valido usa o telefone
+  formatado como nome; nome: 2 a 100 caracteres apos limpar espacos/controles (bruto ate 200; telefone bruto ate 40).
+  Erros: 400 `validacao` (lista vazia/formato/`simular` nao booleano), 400 `limite_excedido` (>300, nada processado),
+  429 `limite_requisicoes` (30/hora para simular e 10/hora para confirmar, por usuario + IP). Corrida na unicidade
+  profissional+telefone vira `duplicado`. So grava nome e telefone (sem consentimento nem observacoes).
 - Cookies: `DJANGO_SESSION_COOKIE_SECURE`, `DJANGO_CSRF_COOKIE_SECURE` (True em producao) e `DJANGO_CSRF_TRUSTED_ORIGINS`.
 - Use `--noinput` ao rodar testes sem terminal (`manage.py test --noinput`), para recriar o banco de testes sem perguntar.
 
