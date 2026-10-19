@@ -1,0 +1,25 @@
+# Fora da imagem de producao: segredos, desenvolvimento, testes e documentacao.
+.git
+.gitignore
+.venv
+venv
+.env
+.env.*
+!.env.production.example
+__pycache__
+**/__pycache__
+*.pyc
+*.log
+staticfiles
+docs
+README.md
+LICENSE
+docker-compose*.yml
+Dockerfile
+.dockerignore
+Caddyfile
+docker/postgres
+docker/caddy
+**/test*.py
+.idea
+.vscode

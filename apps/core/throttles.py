@@ -13,11 +13,7 @@ from rest_framework.exceptions import Throttled
 from rest_framework.throttling import BaseThrottle
 
 from apps.clientes.telefone import normalizar_telefone_br
-
-
-def ip_do_cliente(request):
-    """IP de origem. Por ora so REMOTE_ADDR (ver NUM_PROXIES em settings.py)."""
-    return request.META.get("REMOTE_ADDR", "")
+from apps.core.ip import ip_do_cliente  # noqa: F401  (reexportada: ponto unico de IP)
 
 
 class LimiteJanelaFixa(BaseThrottle):
