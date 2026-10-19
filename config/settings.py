@@ -4,6 +4,8 @@ import os
 import sys
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -30,11 +32,33 @@ def _booleano(valor):
     return valor.strip().lower() in ("1", "true", "yes")
 
 
-SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
-
 DEBUG = _booleano(os.environ.get("DJANGO_DEBUG", "False"))
 
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+
 ALLOWED_HOSTS = _lista(os.environ.get("DJANGO_ALLOWED_HOSTS", ""))
+
+# Segredo compartilhado com o proxy do frontend (Vercel): so com ele o cabecalho X-Bela-Client-Ip vale
+# (ver apps/core/ip.py). Vazio => sempre REMOTE_ADDR.
+PROXY_SECRET = os.environ.get("DJANGO_PROXY_SECRET", "")
+
+if not DEBUG:
+    # Producao: falha cedo e com mensagem clara em vez de subir inseguro.
+    _faltando = [
+        nome for nome, valor in (
+            ("DJANGO_SECRET_KEY", SECRET_KEY),
+            ("DJANGO_ALLOWED_HOSTS", ALLOWED_HOSTS),
+            ("DJANGO_PROXY_SECRET", PROXY_SECRET),
+        ) if not valor
+    ]
+    if _faltando:
+        raise ImproperlyConfigured(
+            "Com DJANGO_DEBUG=False estas variaveis sao obrigatorias: " + ", ".join(_faltando)
+        )
+    if len(PROXY_SECRET) < 32:
+        raise ImproperlyConfigured("DJANGO_PROXY_SECRET deve ter pelo menos 32 caracteres.")
+elif not SECRET_KEY:
+    raise ImproperlyConfigured("Defina DJANGO_SECRET_KEY (veja .env.example).")
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -187,6 +211,17 @@ LIMITES_PUBLICOS = {
     "login_ip": (30, 3600),         # frouxa: IP isolado
 }
 
-# IP do cliente: por ora REMOTE_ADDR. Quando o proxy da Vercel/Caddy estiver na frente, o IP real
-# virira de X-Forwarded-For; so confie nesse cabecalho contando NUM_PROXIES saltos confiaveis.
-NUM_PROXIES = 0
+# IP do cliente (apps/core/ip.py): REMOTE_ADDR, ou X-Bela-Client-Ip quando a requisicao traz o
+# X-Bela-Proxy-Secret correto (proxy do frontend). X-Forwarded-For nunca e usado.
+
+# Producao atras do Caddy (TLS termina la). O redirecionamento HTTP->HTTPS fica com o Caddy; se quiser
+# tambem no Django, DJANGO_SSL_REDIRECT=True (o healthcheck interno e isento).
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "31536000"))
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True  # vale so para subdominios do proprio hostname da API
+SECURE_SSL_REDIRECT = _booleano(os.environ.get("DJANGO_SSL_REDIRECT", "False"))
+SECURE_REDIRECT_EXEMPT = [r"^api/v1/saude/$"]
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+X_FRAME_OPTIONS = "DENY"

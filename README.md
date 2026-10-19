@@ -69,7 +69,9 @@ conta, inclusive token invalido. Identificando por **codigo+telefone**: 5 por IP
 
 Erros no formato `{code, message, fields}`. O limite de requisicoes usa cache em tabela:
 crie-a uma vez com `DJANGO_DB_ROLE=owner python manage.py createcachetable` (os testes a criam sozinhos).
-Limites em `LIMITES_PUBLICOS` (settings.py); o IP e o `REMOTE_ADDR` por enquanto (ver `NUM_PROXIES`).
+Limites em `LIMITES_PUBLICOS` (settings.py). O IP vem de `apps/core/ip.py`: `REMOTE_ADDR`, ou o cabecalho
+`X-Bela-Client-Ip` quando a requisicao traz `X-Bela-Proxy-Secret` igual a `DJANGO_PROXY_SECRET` (proxy do frontend);
+`X-Forwarded-For` nunca e usado.
 
 ## Testes em paralelo
 
@@ -145,3 +147,11 @@ e o link de redefinicao de senha.
 - **Conflitos de concorrencia:** deadlock/serialization failure do PostgreSQL voltam como 409 `conflito_concorrente`
   (repetir a operacao); colisoes raras de codigo curto/token voltam como 409 `tente_novamente`.
 - `fim_ocupado` so e recalculado ao criar ou remarcar; mudar o intervalo da configuracao nao altera agendamentos existentes.
+
+## Producao
+
+Deploy na VPS (Docker, Caddy com HTTPS automatico, PostgreSQL so na rede interna): veja `docs/DEPLOY.md`.
+Arquivos: `Dockerfile`, `docker-compose.prod.yml`, `Caddyfile`, `docker/postgres/init-prod/`,
+`.env.production.example` (copie para `.env.production`, que nao e versionado). Com `DJANGO_DEBUG=False` o settings
+exige `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS` e `DJANGO_PROXY_SECRET` (min. 32 caracteres) e falha com erro claro.
+Validacao: `python manage.py check --deploy` (so restam W008, redirecionamento HTTP->HTTPS feito pelo Caddy, e W021, HSTS preload).
