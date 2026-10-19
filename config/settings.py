@@ -202,6 +202,9 @@ LIMITES_PUBLICOS = {
     # de detalhes e publica consulta o token, entao os tetos sao generosos; toda tentativa conta (inclusive invalida).
     "consulta_token": (120, 3600),         # por IP + slug
     "tenant_consulta_token": (600, 3600),  # por profissional; separado do "tenant" para nao consumir a criacao
+    # Importacao de contatos do painel (D-36), por usuario + IP.
+    "importar_simular": (30, 3600),    # previas (nao gravam)
+    "importar_confirmar": (10, 3600),  # confirmacoes (gravam)
     # Cadastro aberto (D-33), por IP.
     "cadastro_ip": (3, 3600),     # POST /cadastro/
     "cadastro_slug": (30, 3600),  # GET /cadastro/slug/

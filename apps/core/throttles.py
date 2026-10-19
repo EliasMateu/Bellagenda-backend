@@ -126,6 +126,24 @@ class LimiteChecagemSlugPorIP(LimiteJanelaFixa):
         return ip_do_cliente(request)
 
 
+class LimiteImportarContatos(LimiteJanelaFixa):
+    """Importacao de contatos: previa (simular) e confirmacao tem tetos diferentes, por usuario + IP.
+
+    So `simular` booleano True (ou ausente, que e previa) usa o teto da previa; qualquer outro valor
+    cai no teto estrito da confirmacao.
+    """
+
+    escopo = "importar_confirmar"
+
+    def escopo_da_requisicao(self, request):
+        dados = request.data
+        simular = dados.get("simular", True) if hasattr(dados, "get") else True
+        return "importar_simular" if simular is True else "importar_confirmar"
+
+    def identificador(self, request, view):
+        return f"{request.user.pk}|{ip_do_cliente(request)}"
+
+
 class LimiteFalhasLogin:
     """Conta SOMENTE falhas de autenticacao (sucesso nao conta), em tres chaves.
 
